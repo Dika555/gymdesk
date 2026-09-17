@@ -2,12 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { getActiveBranchId } from "@/lib/branch";
+
+type TrainerMember = {
+  id: string;
+  name: string;
+};
 
 type Trainer = {
   id: string;
   name: string;
   phone: string;
   specialization: string;
+  members: TrainerMember[];
 };
 
 export default function TrainersPage() {
@@ -18,27 +25,138 @@ export default function TrainersPage() {
   const [specialization, setSpecialization] = useState("");
 
   const [isOpen, setIsOpen] = useState(false);
+  const [selectedTrainer, setSelectedTrainer] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const [members, setMembers] = useState<TrainerMember[]>([]);
+  const [selectedMember, setSelectedMember] = useState("");
+
+  useEffect(() => {
+    console.log("TRAINERS PAGE TERBUKA");
+    loadTrainers();
+    loadMembers();
+  }, []);
+
   async function loadTrainers() {
+    console.log("=== LOAD TRAINERS ===");
+
     const supabase = createClient();
+    const branchId = getActiveBranchId();
 
-    const { data, error } = await supabase
-      .from("trainers")
-      .select("id, name, phone, specialization")
-      .order("name");
+    console.log("Active Branch ID:", branchId);
 
-    if (error) {
-      console.error(error);
+    if (!branchId) {
+      setTrainers([]);
       return;
     }
 
-    setTrainers(data ?? []);
+    const { data, error } = await supabase
+      .from("trainers")
+      .select("id, name, phone, specialization, branch_id")
+      .eq("branch_id", branchId)
+      .order("name");
+
+    if (error) {
+      console.error("Gagal mengambil trainer:", error);
+      return;
+    }
+
+    const trainerIds = (data ?? []).map((trainer) => trainer.id);
+
+    let trainerMemberData: {
+      trainer_id: string;
+      member_id: string;
+    }[] = [];
+
+    if (trainerIds.length > 0) {
+      const { data: relations, error: relationError } =
+        await supabase
+          .from("trainer_members")
+          .select("trainer_id, member_id")
+          .in("trainer_id", trainerIds);
+
+      if (relationError) {
+        console.error(
+          "Gagal mengambil hubungan trainer-member:",
+          relationError
+        );
+        return;
+      }
+
+      trainerMemberData = relations ?? [];
+    }
+
+    const memberIds = [
+      ...new Set(
+        trainerMemberData.map((item) => item.member_id)
+      ),
+    ];
+
+    let memberData: TrainerMember[] = [];
+
+    if (memberIds.length > 0) {
+      const { data: membersData, error: memberError } =
+        await supabase
+          .from("members")
+          .select("id, name")
+          .in("id", memberIds);
+
+      if (memberError) {
+        console.error(
+          "Gagal mengambil nama member:",
+          memberError
+        );
+        return;
+      }
+
+      memberData = membersData ?? [];
+    }
+
+    setTrainers(
+      (data ?? []).map((trainer) => ({
+        ...trainer,
+        members: trainerMemberData
+          .filter(
+            (relation) =>
+              relation.trainer_id === trainer.id
+          )
+          .map((relation) =>
+            memberData.find(
+              (member) =>
+                member.id === relation.member_id
+            )
+          )
+          .filter(
+            (member): member is TrainerMember =>
+              member !== undefined
+          ),
+      }))
+    );
   }
 
-  useEffect(() => {
-    loadTrainers();
-  }, []);
+  async function loadMembers() {
+    const supabase = createClient();
+
+    const branchId = getActiveBranchId();
+
+    if (!branchId) {
+      setMembers([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("members")
+      .select("id, name")
+      .eq("branch_id", branchId)
+      .order("name");
+
+    if (error) {
+      console.error("Gagal mengambil member:", error);
+      return;
+    }
+
+    setMembers(data ?? []);
+  }
 
   async function addTrainer(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -47,15 +165,27 @@ export default function TrainersPage() {
 
     const supabase = createClient();
 
-    const { error } = await supabase.from("trainers").insert({
-      name,
-      phone,
-      specialization,
-    });
+    const branchId = getActiveBranchId();
+
+    if (!branchId) {
+      alert("Cabang aktif belum dipilih.");
+      setLoading(false);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("trainers")
+      .insert({
+        name,
+        phone,
+        specialization,
+        branch_id: branchId,
+      });
 
     setLoading(false);
 
     if (error) {
+      console.error(error);
       alert(error.message);
       return;
     }
@@ -77,10 +207,20 @@ export default function TrainersPage() {
 
     const supabase = createClient();
 
+    const branchId = getActiveBranchId();
+
+    console.log("Branch aktif:", branchId);
+
+    if (!branchId) {
+      alert("Cabang aktif belum dipilih.");
+      return;
+    }
+
     const { error } = await supabase
       .from("trainers")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .eq("branch_id", branchId);
 
     if (error) {
       alert(error.message);
@@ -88,6 +228,41 @@ export default function TrainersPage() {
     }
 
     loadTrainers();
+  }
+
+  async function addMemberToTrainer() {
+    if (!selectedTrainer) {
+      alert("Trainer belum dipilih.");
+      return;
+    }
+
+    if (!selectedMember) {
+      alert("Silakan pilih member terlebih dahulu.");
+      return;
+    }
+
+    const supabase = createClient();
+
+    const { error } = await supabase
+      .from("trainer_members")
+      .insert({
+        trainer_id: selectedTrainer,
+        member_id: selectedMember,
+        start_date: new Date().toISOString().split("T")[0],
+      });
+
+    if (error) {
+      console.error("Gagal menambahkan member ke trainer:", error);
+      alert(error.message);
+      return;
+    }
+
+    alert("Member berhasil ditambahkan ke trainer.");
+
+    await loadTrainers();
+
+    setSelectedTrainer(null);
+    setSelectedMember("");
   }
 
   return (
@@ -129,6 +304,39 @@ export default function TrainersPage() {
             <p className="mt-1 text-gray-600">
               {trainer.specialization}
             </p>
+
+            <div className="mt-5 border-t pt-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-800">
+                  Member yang Ditangani
+                </h3>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedTrainer(trainer.id)}
+                  className="text-sm font-medium text-orange-500 hover:text-orange-600"
+                >
+                  + Tambah Member
+                </button>
+              </div>
+
+              {trainer.members.length === 0 ? (
+                <p className="mt-2 text-sm text-gray-500">
+                  Belum ada member.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-1">
+                  {trainer.members.map((member) => (
+                    <li
+                      key={member.id}
+                      className="text-sm text-gray-600"
+                    >
+                      • {member.name}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
             <button
               onClick={() => deleteTrainer(trainer.id)}
@@ -225,6 +433,68 @@ export default function TrainersPage() {
 
             <button
               onClick={() => setIsOpen(false)}
+              className="mt-3 w-full rounded-lg border px-4 py-3"
+            >
+              Batal
+            </button>
+          </div>
+        </div>
+      )}
+
+      {selectedTrainer && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="text-xl font-bold">
+                Tambah Member ke Trainer
+              </h2>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTrainer(null);
+                  setSelectedMember("");
+                }}
+                className="text-2xl text-gray-500"
+              >
+                ×
+              </button>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                Pilih Member
+              </label>
+
+              <select
+                value={selectedMember}
+                onChange={(e) => setSelectedMember(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2"
+              >
+                <option value="">Pilih member</option>
+
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={addMemberToTrainer}
+              className="mt-5 w-full rounded-lg bg-orange-500 px-4 py-3 font-medium text-white"
+            >
+              Simpan
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedTrainer(null);
+                setSelectedMember("");
+              }}
               className="mt-3 w-full rounded-lg border px-4 py-3"
             >
               Batal

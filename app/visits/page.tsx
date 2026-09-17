@@ -2,109 +2,163 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-
-type Member = {
-  id: string;
-  name: string;
-};
+import { getActiveBranchId } from "@/lib/branch";
+import AddVisitButton from "@/components/AddVisitButton";
 
 type Visit = {
   id: string;
+  visitor_name: string | null;
   visit_date: string;
-  members: {
+  visit_fee: number;
+  payment_method: string | null;
+  member: {
     name: string;
-  }[] | null;
+  } | null;
 };
 
 export default function VisitsPage() {
-  const [members, setMembers] = useState<Member[]>([]);
   const [visits, setVisits] = useState<Visit[]>([]);
-  const [memberId, setMemberId] = useState("");
 
-  async function loadData() {
+  async function getVisits() {
     const supabase = createClient();
 
-    const { data: memberData } = await supabase
-      .from("members")
-      .select("id, name");
+    const branchId = getActiveBranchId();
 
-    const { data: visitData } = await supabase
-      .from("visits")
-      .select("id, visit_date, members(name)")
-      .order("visit_date", { ascending: false });
-
-    setMembers(memberData ?? []);
-    setVisits(visitData ?? []);
-  }
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function addVisit() {
-    if (!memberId) return;
-
-    const supabase = createClient();
-
-    const { error } = await supabase.from("visits").insert({
-      member_id: memberId,
-      visit_date: new Date().toISOString().split("T")[0],
-    });
-
-    if (error) {
-      alert(error.message);
+    if (!branchId) {
+      setVisits([]);
       return;
     }
 
-    setMemberId("");
-    loadData();
+    const { data, error } = await supabase
+      .from("visits")
+      .select(`
+        id,
+        visitor_name,
+        visit_date,
+        visit_fee,
+        payment_method,
+        member:members (
+          name
+        )
+      `)
+      .eq("branch_id", branchId)
+      .order("visit_date", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    setVisits(
+      (data ?? []).map((visit) => ({
+        ...visit,
+        member: visit.member?.[0] ?? null,
+      }))
+    );
+  }
+
+  useEffect(() => {
+    getVisits();
+  }, []);
+
+  function formatDate(date: string) {
+    return new Date(date).toLocaleDateString("id-ID", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  }
+
+  function formatCurrency(amount: number) {
+    return `Rp ${amount.toLocaleString("id-ID")}`;
   }
 
   return (
-    <main className="min-h-screen bg-gray-100 p-8 text-black">
-      <h1 className="text-3xl font-bold">Visits</h1>
+    <main className="p-6">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Kunjungan
+          </h1>
 
-      <div className="mt-6 max-w-md rounded-xl bg-white p-6 shadow">
-        <h2 className="text-xl font-bold">Catat Kunjungan</h2>
+          <p className="mt-1 text-gray-500">
+            Catat dan lihat riwayat kunjungan gym.
+          </p>
+        </div>
 
-        <select
-          value={memberId}
-          onChange={(e) => setMemberId(e.target.value)}
-          className="mt-4 w-full rounded-lg border p-3"
-        >
-          <option value="">Pilih Member</option>
-
-          {members.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.name}
-            </option>
-          ))}
-        </select>
-
-        <button
-          onClick={addVisit}
-          className="mt-3 w-full rounded-lg bg-black px-4 py-3 text-white"
-        >
-          Catat Kunjungan
-        </button>
+        <AddVisitButton onSuccess={getVisits} />
       </div>
 
-      <div className="mt-8 rounded-xl bg-white p-6 shadow">
-        <h2 className="text-xl font-bold">Riwayat Kunjungan</h2>
+      <div className="overflow-hidden rounded-xl border bg-white">
+        <table className="w-full">
+          <thead className="border-b bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-sm font-medium">
+                Tanggal
+              </th>
 
-        <div className="mt-4 space-y-3">
-          {visits.map((visit) => (
-            <div
-              key={visit.id}
-              className="flex justify-between rounded-lg border p-4"
-            >
-              <span>{visit.members?.[0]?.name ?? "Member"}</span>
-              <span className="text-gray-500">
-                {visit.visit_date}
-              </span>
-            </div>
-          ))}
-        </div>
+              <th className="px-4 py-3 text-left text-sm font-medium">
+                Nama
+              </th>
+
+              <th className="px-4 py-3 text-left text-sm font-medium">
+                Tipe
+              </th>
+
+              <th className="px-4 py-3 text-left text-sm font-medium">
+                Biaya
+              </th>
+
+              <th className="px-4 py-3 text-left text-sm font-medium">
+                Pembayaran
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {visits.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-4 py-8 text-center text-sm text-gray-500"
+                >
+                  Belum ada data kunjungan.
+                </td>
+              </tr>
+            ) : (
+              visits.map((visit) => {
+                const isMember = visit.member !== null;
+
+                return (
+                  <tr
+                    key={visit.id}
+                    className="border-b last:border-b-0"
+                  >
+                    <td className="px-4 py-3 text-sm">
+                      {formatDate(visit.visit_date)}
+                    </td>
+
+                    <td className="px-4 py-3 text-sm font-medium">
+                      {visit.member?.name ?? visit.visitor_name}
+                    </td>
+
+                    <td className="px-4 py-3 text-sm">
+                      {isMember ? "Member" : "Non-member"}
+                    </td>
+
+                    <td className="px-4 py-3 text-sm">
+                      {formatCurrency(visit.visit_fee)}
+                    </td>
+
+                    <td className="px-4 py-3 text-sm capitalize">
+                      {visit.payment_method ?? "-"}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
       </div>
     </main>
   );
