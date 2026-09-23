@@ -1,530 +1,747 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import SummaryReport from "@/components/reports/SummaryReport";
+import MembersReport from "@/components/reports/MembersReport";
+import MembershipReport from "@/components/reports/MembershipReport";
+import VisitsReport from "@/components/reports/VisitsReport";
+import TrainersReport from "@/components/reports/TrainersReport";
+{/*kela
+
+import TransactionReport from "@/components/reports/TransactionReport"
+import ProductReport from "@/components/reports/ProductReport"
+ */}
+
+
+import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getActiveBranchId } from "@/lib/branch";
 
-type TrainerReport = {
-  id: string;
-  name: string;
-  memberCount: number;
-};
-
-type ProductReport = {
-  id: string;
-  name: string;
-  stock: number;
-  min_stock: number;
-  sold: number;
-};
+const reportOptions = [
+  { id: "summary", label: "Ringkasan" },
+  { id: "members", label: "Data Member" },
+  { id: "membership", label: "Data Membership" },
+  { id: "visits", label: "Data Kunjungan" },
+  { id: "trainers", label: "Data Trainer" },
+  { id: "transactions", label: "Data Transaksi" },
+  { id: "products", label: "Data Produk & Stok" },
+];
 
 export default function ReportsPage() {
-  const [selectedPeriod, setSelectedPeriod] = useState("");
+  const [selectedReports, setSelectedReports] = useState<string[]>(
+    reportOptions.map((report) => report.id)
+  );
+
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
-  const [newMembers, setNewMembers] = useState(0);
-  const [totalVisits, setTotalVisits] = useState(0);
-  const [totalRevenue, setTotalRevenue] = useState(0);
-  const [renewals, setRenewals] = useState(0);
+  const [message, setMessage] = useState("");
 
-  const [trainers, setTrainers] = useState<TrainerReport[]>([]);
-  const [products, setProducts] = useState<ProductReport[]>([]);
+  const [summary, setSummary] = useState({
+    newMembers: 0,
+    newMemberships: 0,
+    totalVisits: 0,
+    totalTransactions: 0,
+    totalRevenue: 0,
+  });
 
-  const [loading, setLoading] = useState(false);
+  const [memberReport, setMemberReport] = useState<
+    {
+      id: string;
+      name: string;
+      phone: string | null;
+      email: string | null;
+      gender: string | null;
+      address: string | null;
+      status: string | null;
+      created_at: string;
+    }[]
+  >([]);
 
-  async function getReport() {
-    if (!startDate || !endDate) {
-      return;
+  const [visitReport, setVisitReport] = useState<
+    {
+      id: string;
+      memberName: string;
+      visitDate: string;
+      visitFee: number;
+      paymentMethod: string | null;
+      isMember: boolean;
+    }[]
+  >([]);
+
+  const [membershipReport, setMembershipReport] = useState<
+    {
+      id: string;
+      memberName: string;
+      planName: string;
+      startDate: string;
+      endDate: string;
+      status: string;
+    }[]
+  >([]);
+
+  const [trainerReport, setTrainerReport] = useState<
+    {
+      id: string;
+      name: string;
+      memberCount: number;
+      sessionCount: number;
+      revenue: number;
+    }[]
+  >([]);
+
+  const [showReport, setShowReport] = useState(false);
+
+  function toggleReport(id: string) {
+    setSelectedReports((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id]
+    );
+  }
+
+  function toggleAllReports() {
+    if (selectedReports.length === reportOptions.length) {
+      setSelectedReports([]);
+    } else {
+      setSelectedReports(reportOptions.map((report) => report.id));
     }
+  }
 
-    setLoading(true);
-
+  async function loadSummary() {
     const supabase = createClient();
 
-    // Mengambil cabang yang sedang dipilih di Switch Cabang.
     const branchId = getActiveBranchId();
 
     if (!branchId) {
-      setLoading(false);
+      setMessage("Cabang aktif belum dipilih.");
       return;
     }
 
-    // Supaya tanggal akhir tetap ikut dihitung.
-    const nextDate = new Date(`${endDate}T00:00:00`);
-    nextDate.setDate(nextDate.getDate() + 1);
+    const { count: newMembers, error: memberError } = await supabase
+      .from("members")
+      .select("id", { count: "exact", head: true })
+      .eq("branch_id", branchId)
+      .gte("created_at", `${startDate}T00:00:00`)
+      .lte("created_at", `${endDate}T23:59:59`);
 
-    const nextDateString = nextDate
-      .toISOString()
-      .split("T")[0];
-
-    const [
-      newMembersResult,
-      visitsResult,
-      revenueResult,
-      membershipsResult,
-      trainerResult,
-      trainerMemberResult,
-      productsResult,
-      transactionResult,
-      transactionItemsResult,
-    ] = await Promise.all([
-      // Member baru
-      supabase
-        .from("members")
-        .select("*", { count: "exact", head: true })
-        .eq("branch_id", branchId)
-        .gte("created_at", `${startDate}T00:00:00`)
-        .lt("created_at", nextDateString),
-
-      // Total kunjungan
-      supabase
-        .from("visits")
-        .select("*", { count: "exact", head: true })
-        .eq("branch_id", branchId)
-        .gte("visit_date", startDate)
-        .lt("visit_date", nextDateString),
-
-      // Total pendapatan
-      supabase
-        .from("transactions")
-        .select("total_amount")
-        .eq("branch_id", branchId)
-        .eq("status", "completed")
-        .gte("transaction_date", `${startDate}T00:00:00`)
-        .lt("transaction_date", nextDateString),
-
-      // Membership pada periode tersebut
-      supabase
-        .from("memberships")
-        .select("id, member_id, start_date")
-        .eq("branch_id", branchId)
-        .gte("start_date", startDate)
-        .lt("start_date", nextDateString),
-
-      // Trainer
-      supabase
-        .from("trainers")
-        .select("id, name")
-        .eq("branch_id", branchId)
-        .eq("status", "active"),
-
-      // Relasi trainer dengan member
-      supabase
-        .from("trainer_members")
-        .select("trainer_id, member_id"),
-
-      // Produk
-      supabase
-        .from("products")
-        .select("id, name, stock, min_stock")
-        .eq("branch_id", branchId)
-        .eq("status", "active"),
-
-      // Transaksi produk pada periode tersebut
-      supabase
-        .from("transactions")
-        .select("id, transaction_date, status")
-        .eq("branch_id", branchId)
-        .eq("transaction_type", "product")
-        .eq("status", "completed")
-        .gte("transaction_date", `${startDate}T00:00:00`)
-        .lt("transaction_date", nextDateString),
-
-      // Detail produk yang terjual
-      supabase
-        .from("transaction_items")
-        .select("transaction_id, product_id, quantity"),
-    ]);
-
-    // =========================
-    // MEMBER BARU
-    // =========================
-
-    setNewMembers(newMembersResult.count ?? 0);
-
-    // =========================
-    // TOTAL VISIT
-    // =========================
-
-    setTotalVisits(visitsResult.count ?? 0);
-
-    // =========================
-    // TOTAL PENDAPATAN
-    // =========================
-
-    const revenue =
-      revenueResult.data?.reduce(
-        (total, transaction) =>
-          total + Number(transaction.total_amount ?? 0),
-        0,
-      ) ?? 0;
-
-    setTotalRevenue(revenue);
-
-    // =========================
-    // RENEWAL
-    // =========================
-
-    let renewalCount = 0;
-
-    if (membershipsResult.data) {
-      for (const membership of membershipsResult.data) {
-        const { count } = await supabase
-          .from("memberships")
-          .select("*", { count: "exact", head: true })
-          .eq("member_id", membership.member_id)
-          .lt("start_date", membership.start_date);
-
-        if ((count ?? 0) > 0) {
-          renewalCount++;
-        }
-      }
+    if (memberError) {
+      console.error(memberError);
+      setMessage("Gagal mengambil data member.");
+      return;
     }
 
-    setRenewals(renewalCount);
+    const { count: newMemberships, error: membershipError } = await supabase
+      .from("memberships")
+      .select("id", { count: "exact", head: true })
+      .eq("branch_id", branchId)
+      .gte("created_at", `${startDate}T00:00:00`)
+      .lte("created_at", `${endDate}T23:59:59`);
 
-    // =========================
-    // LAPORAN TRAINER
-    // =========================
+    if (membershipError) {
+      console.error(membershipError);
+      setMessage("Gagal mengambil data membership.");
+      return;
+    }
 
-    const trainerReports: TrainerReport[] =
-      trainerResult.data?.map((trainer) => {
-        const memberCount =
-          trainerMemberResult.data?.filter(
-            (relation) => relation.trainer_id === trainer.id,
-          ).length ?? 0;
+    const { count: totalVisits, error: visitError } = await supabase
+      .from("visits")
+      .select("id", { count: "exact", head: true })
+      .eq("branch_id", branchId)
+      .gte("visit_date", startDate)
+      .lte("visit_date", endDate);
 
-        return {
-          id: trainer.id,
-          name: trainer.name,
-          memberCount,
-        };
-      }) ?? [];
+    if (visitError) {
+      console.error(visitError);
+      setMessage("Gagal mengambil data kunjungan.");
+      return;
+    }
 
-    setTrainers(trainerReports);
+    const { data: transactions, error: transactionError } = await supabase
+      .from("transactions")
+      .select("id, total_amount")
+      .eq("branch_id", branchId)
+      .gte("transaction_date", `${startDate}T00:00:00`)
+      .lte("transaction_date", `${endDate}T23:59:59`)
+      .eq("status", "completed");
 
-    // =========================
-    // LAPORAN PRODUK
-    // =========================
+    if (transactionError) {
+      console.error(transactionError);
+      setMessage("Gagal mengambil data transaksi.");
+      return;
+    }
 
-    const productReports: ProductReport[] =
-      productsResult.data?.map((product) => {
-        let sold = 0;
+    const totalRevenue = (transactions ?? []).reduce(
+      (total, transaction) => total + Number(transaction.total_amount ?? 0),
+      0
+    );
 
-        const productItems =
-          transactionItemsResult.data?.filter(
-            (item) => item.product_id === product.id,
-          ) ?? [];
+    setSummary({
+      newMembers: newMembers ?? 0,
+      newMemberships: newMemberships ?? 0,
+      totalVisits: totalVisits ?? 0,
+      totalTransactions: transactions?.length ?? 0,
+      totalRevenue,
+    });
 
-        for (const item of productItems) {
-          const isValidTransaction =
-            transactionResult.data?.some(
-              (transaction) =>
-                transaction.id === item.transaction_id,
-            );
-
-          if (isValidTransaction) {
-            sold += Number(item.quantity ?? 0);
-          }
-        }
-
-        return {
-          id: product.id,
-          name: product.name,
-          stock: product.stock,
-          min_stock: product.min_stock,
-          sold,
-        };
-      }) ?? [];
-
-    setProducts(productReports);
-
-    setLoading(false);
+    setMessage("Laporan berhasil diperbarui.");
   }
 
-  useEffect(() => {
-    getReport();
-  }, [startDate, endDate]);
+  async function loadMemberReport() {
+    const supabase = createClient();
+
+    const branchId = getActiveBranchId();
+
+    if (!branchId) {
+      setMessage("Cabang aktif belum dipilih.");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("members")
+      .select(`
+      id,
+      name,
+      phone,
+      email,
+      gender,
+      address,
+      status,
+      created_at
+    `)
+      .eq("branch_id", branchId)
+      .gte("created_at", `${startDate}T00:00:00`)
+      .lte("created_at", `${endDate}T23:59:59`)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      setMessage("Gagal mengambil data member.");
+      return;
+    }
+
+    setMemberReport(data ?? []);
+  }
+
+  async function handleShowReport() {
+    setMessage("");
+
+    if (!startDate || !endDate) {
+      setMessage("Silakan pilih tanggal mulai dan tanggal akhir.");
+      return;
+    }
+
+    if (startDate > endDate) {
+      setMessage("Tanggal mulai tidak boleh lebih besar dari tanggal akhir.");
+      return;
+    }
+
+    if (selectedReports.length === 0) {
+      setMessage("Pilih minimal satu jenis laporan.");
+      return;
+    }
+
+    setShowReport(true);
+
+    if (selectedReports.includes("summary")) {
+      await loadSummary();
+    }
+
+    if (selectedReports.includes("members")) {
+      await loadMemberReport();
+    }
+
+    if (selectedReports.includes("membership")) {
+      await loadMembershipReport();
+    }
+
+    if (selectedReports.includes("visits")) {
+      await loadVisitReport();
+    }
+
+    if (selectedReports.includes("trainers")) {
+      await loadTrainerReport();
+    }
+  }
+
+  async function loadMembershipReport() {
+    const supabase = createClient();
+
+    const branchId = getActiveBranchId();
+
+    if (!branchId) {
+      setMessage("Cabang aktif belum dipilih.");
+      return;
+    }
+
+    const { data: memberships, error: membershipError } = await supabase
+      .from("memberships")
+      .select(`
+      id,
+      member_id,
+      plan_id,
+      start_date,
+      end_date,
+      status
+    `)
+      .eq("branch_id", branchId)
+      .lte("start_date", endDate)
+      .gte("end_date", startDate)
+      .order("start_date", { ascending: false });
+
+    if (membershipError) {
+      console.error(membershipError);
+      setMessage("Gagal mengambil data membership.");
+      return;
+    }
+
+    const memberIds = [
+      ...new Set(
+        (memberships ?? []).map((membership) => membership.member_id)
+      ),
+    ];
+
+    const planIds = [
+      ...new Set(
+        (memberships ?? []).map((membership) => membership.plan_id)
+      ),
+    ];
+
+    const { data: members, error: memberError } = await supabase
+      .from("members")
+      .select("id, name")
+      .eq("branch_id", branchId)
+      .in("id", memberIds);
+
+    if (memberError) {
+      console.error(memberError);
+      setMessage("Gagal mengambil data member membership.");
+      return;
+    }
+
+    const { data: plans, error: planError } = await supabase
+      .from("membership_plans")
+      .select("id, name, price")
+      .eq("branch_id", branchId)
+      .in("id", planIds);
+
+    if (planError) {
+      console.error(planError);
+      setMessage("Gagal mengambil data paket membership.");
+      return;
+    }
+
+    const memberMap = new Map(
+      (members ?? []).map((member) => [member.id, member.name])
+    );
+
+    const planMap = new Map(
+      (plans ?? []).map((plan) => [
+        plan.id,
+        {
+          name: plan.name,
+          price: Number(plan.price ?? 0),
+        },
+      ])
+    );
+
+    setMembershipReport(
+      (memberships ?? []).map((membership) => {
+        const plan = planMap.get(membership.plan_id);
+
+        return {
+          id: membership.id,
+          memberName:
+            memberMap.get(membership.member_id) ?? "Member tidak ditemukan",
+          planName: plan?.name ?? "Paket tidak ditemukan",
+          startDate: membership.start_date,
+          endDate: membership.end_date,
+          status: membership.status,
+        };
+      })
+    );
+  }
+
+  async function loadVisitReport() {
+    const supabase = createClient();
+
+    const branchId = getActiveBranchId();
+
+    if (!branchId) {
+      setMessage("Cabang aktif belum dipilih.");
+      return;
+    }
+
+    const { data: visits, error: visitError } = await supabase
+      .from("visits")
+      .select(`
+      id,
+      member_id,
+      visitor_name,
+      visit_date,
+      visit_fee,
+      payment_method
+    `)
+      .eq("branch_id", branchId)
+      .gte("visit_date", startDate)
+      .lte("visit_date", endDate)
+      .order("visit_date", { ascending: false });
+
+    if (visitError) {
+      console.error(visitError);
+      setMessage("Gagal mengambil data kunjungan.");
+      return;
+    }
+
+    const memberIds = [
+      ...new Set(
+        (visits ?? [])
+          .map((visit) => visit.member_id)
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
+
+    let members: { id: string; name: string }[] = [];
+
+    if (memberIds.length > 0) {
+      const { data: memberData, error: memberError } = await supabase
+        .from("members")
+        .select("id, name")
+        .eq("branch_id", branchId)
+        .in("id", memberIds);
+
+      if (memberError) {
+        console.error(memberError);
+        setMessage("Gagal mengambil data member kunjungan.");
+        return;
+      }
+
+      members = memberData ?? [];
+    }
+
+    const memberMap = new Map(
+      members.map((member) => [member.id, member.name])
+    );
+
+    setVisitReport(
+      (visits ?? []).map((visit) => ({
+        id: visit.id,
+        memberName: visit.member_id
+          ? memberMap.get(visit.member_id) ?? "Member tidak ditemukan"
+          : visit.visitor_name ?? "Pengunjung",
+        visitDate: visit.visit_date,
+        visitFee: Number(visit.visit_fee ?? 0),
+        paymentMethod: visit.payment_method,
+        isMember: Boolean(visit.member_id),
+      }))
+    );
+  }
+
+  async function loadTrainerReport() {
+    const supabase = createClient();
+
+    const branchId = getActiveBranchId();
+
+    if (!branchId) {
+      setMessage("Cabang aktif belum dipilih.");
+      return;
+    }
+
+    // Ambil trainer pada cabang aktif
+    const { data: trainers, error: trainerError } = await supabase
+      .from("trainers")
+      .select("id, name")
+      .eq("branch_id", branchId)
+      .order("name", { ascending: true });
+
+    if (trainerError) {
+      console.error(trainerError);
+      setMessage("Gagal mengambil data trainer.");
+      return;
+    }
+
+    if (!trainers || trainers.length === 0) {
+      setTrainerReport([]);
+      return;
+    }
+
+    const trainerIds = trainers.map((trainer) => trainer.id);
+
+    // Ambil hubungan trainer dengan member
+    const { data: trainerMembers, error: trainerMemberError } =
+      await supabase
+        .from("trainer_members")
+        .select("trainer_id, member_id")
+        .in("trainer_id", trainerIds);
+
+    if (trainerMemberError) {
+      console.error(trainerMemberError);
+      setMessage("Gagal mengambil data member trainer.");
+      return;
+    }
+
+    // Ambil sesi trainer pada periode laporan
+    const { data: sessions, error: sessionError } = await supabase
+      .from("trainer_sessions")
+      .select("trainer_id")
+      .in("trainer_id", trainerIds)
+      .gte("session_date", startDate)
+      .lte("session_date", endDate)
+      .eq("status", "completed");
+
+    if (sessionError) {
+      console.error(sessionError);
+      setMessage("Gagal mengambil data sesi trainer.");
+      return;
+    }
+
+    // Ambil paket trainer yang dibeli pada periode laporan
+    const { data: packageMembers, error: packageMemberError } =
+      await supabase
+        .from("trainer_package_members")
+        .select(`
+        trainer_id,
+        transaction_id
+      `)
+        .in("trainer_id", trainerIds)
+        .gte("purchase_date", startDate)
+        .lte("purchase_date", endDate);
+
+    if (packageMemberError) {
+      console.error(packageMemberError);
+      setMessage("Gagal mengambil data paket trainer.");
+      return;
+    }
+
+    // Ambil transaksi dari pembelian paket trainer
+    const transactionIds = [
+      ...new Set(
+        (packageMembers ?? [])
+          .map((item) => item.transaction_id)
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
+
+    let transactions: {
+      id: string;
+      total_amount: number | null;
+    }[] = [];
+
+    if (transactionIds.length > 0) {
+      const { data: transactionData, error: transactionError } =
+        await supabase
+          .from("transactions")
+          .select("id, total_amount")
+          .in("id", transactionIds)
+          .eq("status", "completed");
+
+      if (transactionError) {
+        console.error(transactionError);
+        setMessage("Gagal mengambil transaksi trainer.");
+        return;
+      }
+
+      transactions = transactionData ?? [];
+    }
+
+    // Buat map jumlah member per trainer
+    const memberCountMap = new Map<string, number>();
+
+    for (const item of trainerMembers ?? []) {
+      memberCountMap.set(
+        item.trainer_id,
+        (memberCountMap.get(item.trainer_id) ?? 0) + 1
+      );
+    }
+
+    // Buat map jumlah sesi per trainer
+    const sessionCountMap = new Map<string, number>();
+
+    for (const session of sessions ?? []) {
+      sessionCountMap.set(
+        session.trainer_id,
+        (sessionCountMap.get(session.trainer_id) ?? 0) + 1
+      );
+    }
+
+    // Buat map transaksi berdasarkan ID
+    const transactionMap = new Map(
+      transactions.map((transaction) => [
+        transaction.id,
+        Number(transaction.total_amount ?? 0),
+      ])
+    );
+
+    // Hitung pendapatan masing-masing trainer
+    const revenueMap = new Map<string, number>();
+
+    for (const packageMember of packageMembers ?? []) {
+      if (!packageMember.transaction_id) {
+        continue;
+      }
+
+      const amount =
+        transactionMap.get(packageMember.transaction_id) ?? 0;
+
+      revenueMap.set(
+        packageMember.trainer_id,
+        (revenueMap.get(packageMember.trainer_id) ?? 0) + amount
+      );
+    }
+
+    // Gabungkan seluruh data untuk laporan
+    setTrainerReport(
+      trainers.map((trainer) => ({
+        id: trainer.id,
+        name: trainer.name,
+        memberCount: memberCountMap.get(trainer.id) ?? 0,
+        sessionCount: sessionCountMap.get(trainer.id) ?? 0,
+        revenue: revenueMap.get(trainer.id) ?? 0,
+      }))
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-zinc-50 p-8">
-      <div className="mx-auto max-w-7xl">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-900">
-            Laporan
-          </h1>
+    <main className="p-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-zinc-900">
+          Laporan
+        </h1>
 
-          <p className="mt-1 text-sm text-zinc-500">
-            Ringkasan aktivitas dan transaksi gym berdasarkan periode.
-          </p>
-        </div>
+        <p className="mt-1 text-sm text-zinc-500">
+          Tampilkan dan export laporan berdasarkan periode yang dipilih.
+        </p>
+      </div>
 
-        {/* FILTER PERIODE */}
+      {/* Filter Periode */}
+      <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-5">
+        <h2 className="mb-4 text-base font-semibold text-zinc-900">
+          Periode Laporan
+        </h2>
 
-        <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-5">
-          <h2 className="text-lg font-semibold text-zinc-900">
-            Filter Laporan
-          </h2>
-
-          <div className="mt-4 max-w-sm">
-            <label className="mb-2 block text-sm font-medium text-zinc-700">
-              Periode
+        <div className="flex flex-col gap-4 sm:flex-row">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Dari
             </label>
 
-            <select
-              value={selectedPeriod}
-              onChange={(e) => {
-                const value = e.target.value;
-                setSelectedPeriod(value);
+            <input
+              type="date"
+              value={startDate}
+              onChange={(event) => setStartDate(event.target.value)}
+              className="rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-orange-500"
+            />
+          </div>
 
-                if (value === "custom") {
-                  setStartDate("");
-                  setEndDate("");
-                  return;
-                }
+          <div>
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Sampai
+            </label>
 
-                if (!value) {
-                  setStartDate("");
-                  setEndDate("");
-                  return;
-                }
+            <input
+              type="date"
+              value={endDate}
+              onChange={(event) => setEndDate(event.target.value)}
+              className="rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-orange-500"
+            />
+          </div>
+        </div>
+      </section>
 
-                const [year, month] = value.split("-");
+      {/* Pilihan Laporan */}
+      <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-900">
+              Pilih Laporan
+            </h2>
 
-                const firstDay = `${year}-${month}-01`;
+            <p className="mt-1 text-sm text-zinc-500">
+              Pilih data yang ingin ditampilkan atau diexport.
+            </p>
+          </div>
 
-                const lastDay = new Date(
-                  Number(year),
-                  Number(month),
-                  0,
-                )
-                  .toISOString()
-                  .split("T")[0];
+          <button
+            type="button"
+            onClick={toggleAllReports}
+            className="text-sm font-medium text-orange-600 hover:text-orange-700"
+          >
+            {selectedReports.length === reportOptions.length
+              ? "Batalkan Semua"
+              : "Pilih Semua"}
+          </button>
+        </div>
 
-                setStartDate(firstDay);
-                setEndDate(lastDay);
-              }}
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-orange-500"
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {reportOptions.map((report) => (
+            <label
+              key={report.id}
+              className="flex cursor-pointer items-center gap-3 rounded-lg border border-zinc-200 p-3 hover:bg-zinc-50"
             >
-              <option value="">Pilih periode</option>
+              <input
+                type="checkbox"
+                checked={selectedReports.includes(report.id)}
+                onChange={() => toggleReport(report.id)}
+                className="h-4 w-4 accent-orange-500"
+              />
 
-              <option value="2026-01">Januari 2026</option>
-              <option value="2026-02">Februari 2026</option>
-              <option value="2026-03">Maret 2026</option>
-              <option value="2026-04">April 2026</option>
-              <option value="2026-05">Mei 2026</option>
-              <option value="2026-06">Juni 2026</option>
-              <option value="2026-07">Juli 2026</option>
-              <option value="2026-08">Agustus 2026</option>
-              <option value="2026-09">September 2026</option>
-              <option value="2026-10">Oktober 2026</option>
-              <option value="2026-11">November 2026</option>
-              <option value="2026-12">Desember 2026</option>
-
-              <option value="custom">Custom</option>
-            </select>
-          </div>
-
-          {selectedPeriod === "custom" && (
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 max-w-lg">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-zinc-700">
-                  Tanggal Mulai
-                </label>
-
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-orange-500"
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-zinc-700">
-                  Tanggal Akhir
-                </label>
-
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-orange-500"
-                />
-              </div>
-            </div>
-          )}
+              <span className="text-sm font-medium text-zinc-700">
+                {report.label}
+              </span>
+            </label>
+          ))}
         </div>
+      </section>
 
-        {/* RINGKASAN */}
+      {/* Tombol Aksi */}
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={handleShowReport}
+          className="rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-600"
+        >
+          Tampilkan Laporan
+        </button>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border border-zinc-200 bg-white p-5">
-            <p className="text-sm text-zinc-500">
-              Member Baru
-            </p>
-
-            <p className="mt-2 text-2xl font-semibold text-zinc-900">
-              {loading ? "..." : newMembers}
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-zinc-200 bg-white p-5">
-            <p className="text-sm text-zinc-500">
-              Renewal
-            </p>
-
-            <p className="mt-2 text-2xl font-semibold text-zinc-900">
-              {loading ? "..." : renewals}
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-zinc-200 bg-white p-5">
-            <p className="text-sm text-zinc-500">
-              Total Visit
-            </p>
-
-            <p className="mt-2 text-2xl font-semibold text-zinc-900">
-              {loading ? "..." : totalVisits}
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-zinc-200 bg-white p-5">
-            <p className="text-sm text-zinc-500">
-              Pendapatan
-            </p>
-
-            <p className="mt-2 text-2xl font-semibold text-zinc-900">
-              {loading
-                ? "..."
-                : `Rp ${totalRevenue.toLocaleString("id-ID")}`}
-            </p>
-          </div>
-        </div>
-
-        {/* TRAINER */}
-
-        <div className="mt-8 rounded-xl border border-zinc-200 bg-white">
-          <div className="border-b border-zinc-200 p-5">
-            <h2 className="text-lg font-semibold text-zinc-900">
-              Laporan Trainer
-            </h2>
-
-            <p className="mt-1 text-sm text-zinc-500">
-              Jumlah member yang ditangani setiap trainer.
-            </p>
-          </div>
-
-          {trainers.length === 0 ? (
-            <div className="p-5 text-sm text-zinc-500">
-              Belum ada data trainer.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-zinc-200 bg-zinc-50">
-                  <tr>
-                    <th className="px-5 py-3 font-medium text-zinc-600">
-                      Trainer
-                    </th>
-
-                    <th className="px-5 py-3 font-medium text-zinc-600">
-                      Member Ditangani
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {trainers.map((trainer) => (
-                    <tr
-                      key={trainer.id}
-                      className="border-b border-zinc-100 last:border-0"
-                    >
-                      <td className="px-5 py-4 font-medium text-zinc-900">
-                        {trainer.name}
-                      </td>
-
-                      <td className="px-5 py-4 text-zinc-600">
-                        {trainer.memberCount}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* PRODUK */}
-
-        <div className="mt-8 rounded-xl border border-zinc-200 bg-white">
-          <div className="border-b border-zinc-200 p-5">
-            <h2 className="text-lg font-semibold text-zinc-900">
-              Laporan Produk & Stok
-            </h2>
-
-            <p className="mt-1 text-sm text-zinc-500">
-              Penjualan produk dan kondisi stok saat ini.
-            </p>
-          </div>
-
-          {products.length === 0 ? (
-            <div className="p-5 text-sm text-zinc-500">
-              Belum ada data produk.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-zinc-200 bg-zinc-50">
-                  <tr>
-                    <th className="px-5 py-3 font-medium text-zinc-600">
-                      Produk
-                    </th>
-
-                    <th className="px-5 py-3 font-medium text-zinc-600">
-                      Terjual
-                    </th>
-
-                    <th className="px-5 py-3 font-medium text-zinc-600">
-                      Stok
-                    </th>
-
-                    <th className="px-5 py-3 font-medium text-zinc-600">
-                      Minimum Stok
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {products.map((product) => (
-                    <tr
-                      key={product.id}
-                      className="border-b border-zinc-100 last:border-0"
-                    >
-                      <td className="px-5 py-4 font-medium text-zinc-900">
-                        {product.name}
-                      </td>
-
-                      <td className="px-5 py-4 text-zinc-600">
-                        {product.sold}
-                      </td>
-
-                      <td className="px-5 py-4 text-zinc-600">
-                        {product.stock}
-                      </td>
-
-                      <td className="px-5 py-4 text-zinc-600">
-                        {product.min_stock}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+        >
+          Export XLSX
+        </button>
       </div>
+
+      {selectedReports.includes("summary") && showReport && (
+        <SummaryReport
+          newMembers={summary.newMembers}
+          newMemberships={summary.newMemberships}
+          totalVisits={summary.totalVisits}
+          totalTransactions={summary.totalTransactions}
+          totalRevenue={summary.totalRevenue}
+        />
+      )}
+
+      {selectedReports.includes("members") && showReport && (
+        <MembersReport members={memberReport} />
+      )}
+
+      {selectedReports.includes("membership") && showReport && (
+        <MembershipReport memberships={membershipReport} />
+      )}
+
+      {selectedReports.includes("visits") && showReport && (
+        <VisitsReport visits={visitReport} />
+      )}
+
+      {selectedReports.includes("trainers") && showReport && (
+        <TrainersReport trainers={trainerReport} />
+      )}
+
+      {/* Pesan */}
+      {message && (
+        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
+          {message}
+        </div>
+      )}
     </main>
   );
 }

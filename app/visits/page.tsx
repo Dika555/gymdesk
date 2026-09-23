@@ -7,6 +7,7 @@ import AddVisitButton from "@/components/AddVisitButton";
 
 type Visit = {
   id: string;
+  member_id: string | null;
   visitor_name: string | null;
   visit_date: string;
   visit_fee: number;
@@ -20,42 +21,73 @@ export default function VisitsPage() {
   const [visits, setVisits] = useState<Visit[]>([]);
 
   async function getVisits() {
-    const supabase = createClient();
+  const supabase = createClient();
 
-    const branchId = getActiveBranchId();
+  const branchId = getActiveBranchId();
 
-    if (!branchId) {
-      setVisits([]);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("visits")
-      .select(`
-        id,
-        visitor_name,
-        visit_date,
-        visit_fee,
-        payment_method,
-        member:members (
-          name
-        )
-      `)
-      .eq("branch_id", branchId)
-      .order("visit_date", { ascending: false });
-
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    setVisits(
-      (data ?? []).map((visit) => ({
-        ...visit,
-        member: visit.member?.[0] ?? null,
-      }))
-    );
+  if (!branchId) {
+    setVisits([]);
+    return;
   }
+
+  // Ambil data kunjungan
+  const { data: visitData, error: visitError } = await supabase
+    .from("visits")
+    .select(`
+      id,
+      member_id,
+      visitor_name,
+      visit_date,
+      visit_fee,
+      payment_method
+    `)
+    .eq("branch_id", branchId)
+    .order("visit_date", { ascending: false });
+
+  if (visitError) {
+    console.error(visitError);
+    return;
+  }
+
+  // Ambil data member dari cabang aktif
+  const { data: memberData, error: memberError } = await supabase
+    .from("members")
+    .select("id, name")
+    .eq("branch_id", branchId);
+
+  if (memberError) {
+    console.error(memberError);
+    return;
+  }
+
+  // Buat pasangan ID member → nama member
+  const membersMap = new Map(
+    (memberData ?? []).map((member) => [
+      member.id,
+      member.name,
+    ])
+  );
+
+  // Gabungkan data visit dengan nama member
+  const formattedVisits: Visit[] = (visitData ?? []).map((visit) => ({
+    id: visit.id,
+    member_id: visit.member_id,
+    visitor_name: visit.visitor_name,
+    visit_date: visit.visit_date,
+    visit_fee: visit.visit_fee,
+    payment_method: visit.payment_method,
+
+    member: visit.member_id
+      ? {
+          name:
+            membersMap.get(visit.member_id) ??
+            "Member tidak ditemukan",
+        }
+      : null,
+  }));
+
+  setVisits(formattedVisits);
+}
 
   useEffect(() => {
     getVisits();

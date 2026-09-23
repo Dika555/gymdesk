@@ -14,7 +14,8 @@ type Trainer = {
   name: string;
   phone: string;
   specialization: string;
-  members: TrainerMember[];
+  status: "active" | "inavtive";
+  memberCount: number;
 };
 
 export default function TrainersPage() {
@@ -25,25 +26,56 @@ export default function TrainersPage() {
   const [specialization, setSpecialization] = useState("");
 
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedTrainer, setSelectedTrainer] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [members, setMembers] = useState<TrainerMember[]>([]);
-  const [selectedMember, setSelectedMember] = useState("");
-
   useEffect(() => {
-    console.log("TRAINERS PAGE TERBUKA");
     loadTrainers();
-    loadMembers();
   }, []);
 
-  async function loadTrainers() {
-    console.log("=== LOAD TRAINERS ===");
+  async function addTrainer(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
 
     const supabase = createClient();
     const branchId = getActiveBranchId();
 
-    console.log("Active Branch ID:", branchId);
+    if (!branchId) {
+      alert("Cabang aktif belum dipilih.");
+      return;
+    }
+
+    const formData = new FormData(e.currentTarget);
+
+    const name = String(formData.get("name") ?? "").trim();
+    const phone = String(formData.get("phone") ?? "").trim();
+    const specialization = String(
+      formData.get("specialization") ?? ""
+    ).trim();
+
+    if (!name) {
+      alert("Nama trainer wajib diisi.");
+      return;
+    }
+
+    const { error } = await supabase.from("trainers").insert({
+      name,
+      phone,
+      specialization,
+      branch_id: branchId,
+    });
+
+    if (error) {
+      console.error("Gagal menambahkan trainer:", error);
+      alert("Gagal menambahkan trainer.");
+      return;
+    }
+
+    setIsOpen(false);
+    await loadTrainers();
+  }
+
+  async function loadTrainers() {
+    const supabase = createClient();
+    const branchId = getActiveBranchId();
 
     if (!branchId) {
       setTrainers([]);
@@ -52,18 +84,15 @@ export default function TrainersPage() {
 
     const { data, error } = await supabase
       .from("trainers")
-      .select("id, name, phone, specialization, branch_id")
+      .select(
+        "id, name, phone, specialization, branch_id, status"
+      )
       .eq("branch_id", branchId)
       .order("name");
 
-    if (error) {
-      console.error("Gagal mengambil trainer:", error);
-      return;
-    }
-
     const trainerIds = (data ?? []).map((trainer) => trainer.id);
 
-    let trainerMemberData: {
+    let memberRelations: {
       trainer_id: string;
       member_id: string;
     }[] = [];
@@ -83,187 +112,38 @@ export default function TrainersPage() {
         return;
       }
 
-      trainerMemberData = relations ?? [];
+      memberRelations = relations ?? [];
     }
 
-    const memberIds = [
-      ...new Set(
-        trainerMemberData.map((item) => item.member_id)
-      ),
-    ];
+    const memberCountMap = new Map<string, number>();
 
-    let memberData: TrainerMember[] = [];
-
-    if (memberIds.length > 0) {
-      const { data: membersData, error: memberError } =
-        await supabase
-          .from("members")
-          .select("id, name")
-          .in("id", memberIds);
-
-      if (memberError) {
-        console.error(
-          "Gagal mengambil nama member:",
-          memberError
-        );
-        return;
-      }
-
-      memberData = membersData ?? [];
+    for (const relation of memberRelations) {
+      memberCountMap.set(
+        relation.trainer_id,
+        (memberCountMap.get(relation.trainer_id) ?? 0) + 1
+      );
     }
 
-    setTrainers(
-      (data ?? []).map((trainer) => ({
-        ...trainer,
-        members: trainerMemberData
-          .filter(
-            (relation) =>
-              relation.trainer_id === trainer.id
-          )
-          .map((relation) =>
-            memberData.find(
-              (member) =>
-                member.id === relation.member_id
-            )
-          )
-          .filter(
-            (member): member is TrainerMember =>
-              member !== undefined
-          ),
+    const formattedTrainers = (data ?? [])
+      .map((trainer) => ({
+        id: trainer.id,
+        name: trainer.name,
+        phone: trainer.phone,
+        specialization: trainer.specialization,
+        status: trainer.status,
+        memberCount: memberCountMap.get(trainer.id) ?? 0,
       }))
-    );
-  }
+      .sort((a, b) => {
+        if (a.status !== b.status) {
+          return a.status === "active" ? -1 : 1;
+        }
 
-  async function loadMembers() {
-    const supabase = createClient();
-
-    const branchId = getActiveBranchId();
-
-    if (!branchId) {
-      setMembers([]);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("members")
-      .select("id, name")
-      .eq("branch_id", branchId)
-      .order("name");
-
-    if (error) {
-      console.error("Gagal mengambil member:", error);
-      return;
-    }
-
-    setMembers(data ?? []);
-  }
-
-  async function addTrainer(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-
-    setLoading(true);
-
-    const supabase = createClient();
-
-    const branchId = getActiveBranchId();
-
-    if (!branchId) {
-      alert("Cabang aktif belum dipilih.");
-      setLoading(false);
-      return;
-    }
-
-    const { error } = await supabase
-      .from("trainers")
-      .insert({
-        name,
-        phone,
-        specialization,
-        branch_id: branchId,
+        return a.name.localeCompare(b.name);
       });
 
-    setLoading(false);
-
-    if (error) {
-      console.error(error);
-      alert(error.message);
-      return;
-    }
-
-    setName("");
-    setPhone("");
-    setSpecialization("");
-    setIsOpen(false);
-
-    loadTrainers();
+    setTrainers(formattedTrainers);
   }
 
-  async function deleteTrainer(id: string) {
-    const confirmed = confirm(
-      "Yakin ingin menghapus trainer ini?"
-    );
-
-    if (!confirmed) return;
-
-    const supabase = createClient();
-
-    const branchId = getActiveBranchId();
-
-    console.log("Branch aktif:", branchId);
-
-    if (!branchId) {
-      alert("Cabang aktif belum dipilih.");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("trainers")
-      .delete()
-      .eq("id", id)
-      .eq("branch_id", branchId);
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    loadTrainers();
-  }
-
-  async function addMemberToTrainer() {
-    if (!selectedTrainer) {
-      alert("Trainer belum dipilih.");
-      return;
-    }
-
-    if (!selectedMember) {
-      alert("Silakan pilih member terlebih dahulu.");
-      return;
-    }
-
-    const supabase = createClient();
-
-    const { error } = await supabase
-      .from("trainer_members")
-      .insert({
-        trainer_id: selectedTrainer,
-        member_id: selectedMember,
-        start_date: new Date().toISOString().split("T")[0],
-      });
-
-    if (error) {
-      console.error("Gagal menambahkan member ke trainer:", error);
-      alert(error.message);
-      return;
-    }
-
-    alert("Member berhasil ditambahkan ke trainer.");
-
-    await loadTrainers();
-
-    setSelectedTrainer(null);
-    setSelectedMember("");
-  }
 
   return (
     <main className="min-h-screen bg-gray-100 p-8 text-black">
@@ -291,11 +171,22 @@ export default function TrainersPage() {
         {trainers.map((trainer) => (
           <div
             key={trainer.id}
-            className="rounded-xl bg-white p-6 shadow"
+            className="rounded-xl bg-white p-6 shadow transition hover:-translate-y-1 hover:shadow-md"
           >
             <h2 className="text-xl font-bold">
               {trainer.name}
             </h2>
+
+            <p
+              className={`mt-1 text-sm font-medium ${trainer.status === "active"
+                  ? "text-green-600"
+                  : "text-zinc-500"
+                }`}
+            >
+              {trainer.status === "active"
+                ? "Aktif"
+                : "Tidak Aktif"}
+            </p>
 
             <p className="mt-3 text-gray-600">
               {trainer.phone}
@@ -305,45 +196,27 @@ export default function TrainersPage() {
               {trainer.specialization}
             </p>
 
-            <div className="mt-5 border-t pt-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-gray-800">
-                  Member yang Ditangani
-                </h3>
+            <div className="mt-5 rounded-lg bg-gray-50 p-4">
+              <p className="text-sm text-gray-500">
+                Member yang Ditangani
+              </p>
 
-                <button
-                  type="button"
-                  onClick={() => setSelectedTrainer(trainer.id)}
-                  className="text-sm font-medium text-orange-500 hover:text-orange-600"
-                >
-                  + Tambah Member
-                </button>
-              </div>
-
-              {trainer.members.length === 0 ? (
-                <p className="mt-2 text-sm text-gray-500">
-                  Belum ada member.
-                </p>
-              ) : (
-                <ul className="mt-2 space-y-1">
-                  {trainer.members.map((member) => (
-                    <li
-                      key={member.id}
-                      className="text-sm text-gray-600"
-                    >
-                      • {member.name}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <p className="mt-1 text-lg font-semibold text-gray-900">
+                {trainer.memberCount} Member
+              </p>
             </div>
 
-            <button
-              onClick={() => deleteTrainer(trainer.id)}
-              className="mt-5 rounded-lg bg-red-600 px-4 py-2 text-white"
-            >
-              Hapus
-            </button>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = `/trainers/${trainer.id}`;
+                }}
+                className="flex-1 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600"
+              >
+                Lihat Detail
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -376,6 +249,7 @@ export default function TrainersPage() {
 
                 <input
                   type="text"
+                  name="name"
                   value={name}
                   onChange={(e) =>
                     setName(e.target.value)
@@ -393,6 +267,7 @@ export default function TrainersPage() {
 
                 <input
                   type="text"
+                  name="phone"
                   value={phone}
                   onChange={(e) =>
                     setPhone(e.target.value)
@@ -410,6 +285,7 @@ export default function TrainersPage() {
 
                 <input
                   type="text"
+                  name="specialization"
                   value={specialization}
                   onChange={(e) =>
                     setSpecialization(e.target.value)
@@ -433,68 +309,6 @@ export default function TrainersPage() {
 
             <button
               onClick={() => setIsOpen(false)}
-              className="mt-3 w-full rounded-lg border px-4 py-3"
-            >
-              Batal
-            </button>
-          </div>
-        </div>
-      )}
-
-      {selectedTrainer && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold">
-                Tambah Member ke Trainer
-              </h2>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedTrainer(null);
-                  setSelectedMember("");
-                }}
-                className="text-2xl text-gray-500"
-              >
-                ×
-              </button>
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium">
-                Pilih Member
-              </label>
-
-              <select
-                value={selectedMember}
-                onChange={(e) => setSelectedMember(e.target.value)}
-                className="w-full rounded-lg border px-3 py-2"
-              >
-                <option value="">Pilih member</option>
-
-                {members.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              type="button"
-              onClick={addMemberToTrainer}
-              className="mt-5 w-full rounded-lg bg-orange-500 px-4 py-3 font-medium text-white"
-            >
-              Simpan
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedTrainer(null);
-                setSelectedMember("");
-              }}
               className="mt-3 w-full rounded-lg border px-4 py-3"
             >
               Batal

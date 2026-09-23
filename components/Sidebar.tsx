@@ -108,16 +108,14 @@ export default function Sidebar() {
         <div className="space-y-1">
           
           {menuItems.map((item) => {
-            const active =
-              pathname === item.href ||
-              (item.href !== "/" && pathname.startsWith(item.href));
+            const isActive = pathname ===item.href;
 
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={`block rounded-lg px-4 py-3 text-sm font-medium transition ${
-                  active
+                  isActive
                     ? "bg-orange-500 text-white"
                     : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
                 }`}
