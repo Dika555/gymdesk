@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import StatCard from "@/components/StatCard";
 import VisitChart from "@/components/VisitChart";
@@ -5,6 +6,9 @@ import RecentActivity from "@/components/RecentActivity";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
+
+  const cookieStore = await cookies();
+  const branchId = cookieStore.get("activeBranchId")?.value;
 
   const now = new Date();
 
@@ -18,58 +22,60 @@ export default async function DashboardPage() {
     sevenDaysAgo.getDate() - 6
   );
 
-    const startDate = sevenDaysAgo.toLocaleDateString(
-      "en-CA",
-      {
-        timeZone: "Asia/Jakarta",
-      }
+  const startDate = sevenDaysAgo.toLocaleDateString(
+    "en-CA",
+    {
+      timeZone: "Asia/Jakarta",
+    }
+  );
+
+  const { data: visits } = await supabase
+    .from("visits")
+    .select("visit_date")
+    .eq("branch_id", branchId)
+    .gte("visit_date", startDate)
+    .lte("visit_date", today);
+
+  const visitChartData = [];
+
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(sevenDaysAgo);
+
+    date.setDate(
+      sevenDaysAgo.getDate() + i
     );
 
-    const { data: visits } = await supabase
-      .from("visits")
-      .select("visit_date")
-      .gte("visit_date", startDate)
-      .lte("visit_date", today);
+    const dateString =
+      date.toISOString().split("T")[0];
 
-    const visitChartData = [];
+    const total =
+      visits?.filter(
+        (visit) =>
+          visit.visit_date === dateString
+      ).length ?? 0;
 
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(sevenDaysAgo);
+    visitChartData.push({
+      date: dateString,
+      total,
+    });
+  }
 
-      date.setDate(
-        sevenDaysAgo.getDate() + i
-      );
-
-      const dateString =
-        date.toISOString().split("T")[0];
-
-      const total =
-        visits?.filter(
-          (visit) =>
-            visit.visit_date === dateString
-        ).length ?? 0;
-
-      visitChartData.push({
-        date: dateString,
-        total,
-      });
-    }
-
-    const { data: recentTransactions } = await supabase
-      .from("transactions")
-      .select(`
-        id,
-        transaction_type,
-        total_amount,
-        transaction_date,
-        members (
-          name
-        )
-      `)
-      .order("transaction_date", {
-        ascending: false,
-      })
-      .limit(5);
+  const { data: recentTransactions } = await supabase
+    .from("transactions")
+    .select(`
+    id,
+    transaction_type,
+    total_amount,
+    transaction_date,
+    members (
+      name
+    )
+  `)
+    .eq("branch_id", branchId)
+    .order("transaction_date", {
+      ascending: false,
+    })
+    .limit(5);
 
   const [
     { count: totalMember },
@@ -79,21 +85,25 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     supabase
       .from("members")
-      .select("*", { count: "exact", head: true }),
+      .select("*", { count: "exact", head: true })
+      .eq("branch_id", branchId),
 
     supabase
       .from("members")
       .select("*", { count: "exact", head: true })
+      .eq("branch_id", branchId)
       .eq("status", "aktif"),
 
     supabase
       .from("visits")
       .select("*", { count: "exact", head: true })
+      .eq("branch_id", branchId)
       .eq("visit_date", today),
 
     supabase
       .from("transactions")
       .select("*", { count: "exact", head: true })
+      .eq("branch_id", branchId)
       .gte("transaction_date", `${today}T00:00:00`)
       .lt("transaction_date", `${today}T23:59:59.999`),
   ]);

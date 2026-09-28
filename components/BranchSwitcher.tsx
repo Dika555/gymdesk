@@ -19,67 +19,43 @@ export default function BranchSwitcher() {
   }, []);
 
   async function loadBranches() {
-    const {
-        data: { user },
-    } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from("branches")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("name");
 
-    if (!user) {
-        alert("Tidak ada user yang sedang login.");
-        return;
+    if (error) {
+      console.error(error);
+      alert("Gagal mengambil data cabang: " + error.message);
+      return;
     }
 
-    const { data: accessData, error: accessError } = await supabase
-        .from("user_branches")
-        .select("branch_id")
-        .eq("user_id", user.id);
-
-    if (accessError) {
-        console.error(accessError);
-        alert("Gagal mengambil akses cabang: " + accessError.message);
-        return;
-    }
-
-    if (!accessData || accessData.length === 0) {
-        alert("User ini belum memiliki akses cabang.");
-        return;
-    }
-
-    const branchIds = accessData.map((item) => item.branch_id);
-
-    const { data: branchData, error: branchError } = await supabase
-        .from("branches")
-        .select("id, name")
-        .in("id", branchIds);
-
-    if (branchError) {
-        console.error(branchError);
-        alert("Gagal mengambil data cabang: " + branchError.message);
-        return;
-    }
-
-    const branchList: Branch[] = branchData ?? [];
+    const branchList = data ?? [];
 
     setBranches(branchList);
 
     const savedBranch = localStorage.getItem("activeBranchId");
 
     if (
-        savedBranch &&
-        branchList.some((branch) => branch.id === savedBranch)
+      savedBranch &&
+      branchList.some((branch) => branch.id === savedBranch)
     ) {
-        setSelectedBranch(savedBranch);
+      setSelectedBranch(savedBranch);
     } else if (branchList.length > 0) {
-        setSelectedBranch(branchList[0].id);
-        localStorage.setItem("activeBranchId", branchList[0].id);
+      setSelectedBranch(branchList[0].id);
+      localStorage.setItem("activeBranchId", branchList[0].id);
     }
-    }
+  }
 
   function handleChange(branchId: string) {
-    setSelectedBranch(branchId);
-    localStorage.setItem("activeBranchId", branchId);
+  setSelectedBranch(branchId);
+  localStorage.setItem("activeBranchId", branchId);
+  document.cookie = `activeBranchId=${branchId}; path=/`;
 
-    window.location.reload();
-  }
+  window.location.reload();
+}
+
 
   return (
     <select

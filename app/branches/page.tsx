@@ -8,6 +8,7 @@ type Branch = {
   name: string;
   address: string | null;
   phone: string | null;
+  is_active: boolean;
 };
 
 export default function BranchesPage() {
@@ -53,7 +54,7 @@ export default function BranchesPage() {
 
     const { data, error } = await supabase
       .from("branches")
-      .select("id, name, address, phone")
+      .select("id, name, address, phone, is_active")
       .order("name");
 
     if (error) {
@@ -142,9 +143,15 @@ export default function BranchesPage() {
     loadBranches();
   }
 
-  async function handleDelete(branch: Branch) {
-    const confirmed = confirm(
-      `Yakin ingin menghapus cabang "${branch.name}"?`
+  async function handleToggleStatus(branch: Branch) {
+    const newStatus = !branch.is_active;
+
+    const action = newStatus
+      ? "mengaktifkan"
+      : "menonaktifkan";
+
+    const confirmed = window.confirm(
+      `Apakah kamu yakin ingin ${action} cabang "${branch.name}"?`
     );
 
     if (!confirmed) {
@@ -153,18 +160,22 @@ export default function BranchesPage() {
 
     const { error } = await supabase
       .from("branches")
-      .delete()
+      .update({
+        is_active: newStatus,
+      })
       .eq("id", branch.id);
 
     if (error) {
-      console.error(error);
-      alert(
-        "Cabang tidak dapat dihapus. Pastikan cabang tersebut belum digunakan oleh data lain."
-      );
+      console.error("Gagal mengubah status cabang:", error);
+      alert("Gagal mengubah status cabang: " + error.message);
       return;
     }
 
-    alert("Cabang berhasil dihapus.");
+    alert(
+      newStatus
+        ? "Cabang berhasil diaktifkan."
+        : "Cabang berhasil dinonaktifkan."
+    );
 
     loadBranches();
   }
@@ -205,71 +216,91 @@ export default function BranchesPage() {
           </div>
 
           {showForm && (
-            <div className="mb-8 rounded-xl border border-zinc-200 bg-zinc-50 p-6">
-              <h2 className="mb-5 text-xl font-semibold">
-                {editingId ? "Edit Cabang" : "Tambah Cabang"}
-              </h2>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+              <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+                <div className="mb-6 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-zinc-900">
+                      {editingId ? "Edit Cabang" : "Tambah Cabang"}
+                    </h2>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="mb-1 block text-sm font-medium">
-                    Nama Cabang
-                  </label>
-
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Nama cabang"
-                    className="w-full rounded-lg border border-zinc-300 px-4 py-3 outline-none focus:border-orange-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium">
-                    Alamat
-                  </label>
-
-                  <textarea
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Alamat cabang"
-                    rows={3}
-                    className="w-full rounded-lg border border-zinc-300 px-4 py-3 outline-none focus:border-orange-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium">
-                    Nomor Telepon
-                  </label>
-
-                  <input
-                    type="text"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="Nomor telepon"
-                    className="w-full rounded-lg border border-zinc-300 px-4 py-3 outline-none focus:border-orange-500"
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-orange-500 px-5 py-3 font-medium text-white hover:bg-orange-600"
-                  >
-                    {editingId ? "Simpan Perubahan" : "Simpan Cabang"}
-                  </button>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      {editingId
+                        ? "Ubah informasi cabang."
+                        : "Tambahkan cabang baru ke GymDesk."}
+                    </p>
+                  </div>
 
                   <button
                     type="button"
                     onClick={closeForm}
-                    className="rounded-lg border border-zinc-300 px-5 py-3 font-medium text-zinc-700 hover:bg-zinc-100"
+                    className="text-zinc-400 hover:text-zinc-900"
                   >
-                    Batal
+                    ✕
                   </button>
                 </div>
-              </form>
+
+                <form onSubmit={handleSubmit} className="space-y-5">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-zinc-700">
+                      Nama Cabang
+                    </label>
+
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Nama cabang"
+                      className="w-full rounded-lg border border-zinc-300 px-4 py-3 text-sm outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-zinc-700">
+                      Alamat
+                    </label>
+
+                    <textarea
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="Alamat cabang"
+                      rows={3}
+                      className="w-full rounded-lg border border-zinc-300 px-4 py-3 text-sm outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-zinc-700">
+                      Nomor Telepon
+                    </label>
+
+                    <input
+                      type="text"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="Nomor telepon"
+                      className="w-full rounded-lg border border-zinc-300 px-4 py-3 text-sm outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={closeForm}
+                      className="rounded-lg border border-zinc-300 px-5 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Batal
+                    </button>
+
+                    <button
+                      type="submit"
+                      className="rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-orange-600"
+                    >
+                      {editingId ? "Simpan Perubahan" : "Simpan Cabang"}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           )}
 
@@ -281,6 +312,7 @@ export default function BranchesPage() {
                   <th className="px-6 py-4">Nama Cabang</th>
                   <th className="px-6 py-4">Alamat</th>
                   <th className="px-6 py-4">Telepon</th>
+                  <th className="px-6 py4">Status</th>
                   <th className="px-6 py-4">Aksi</th>
                 </tr>
               </thead>
@@ -325,6 +357,18 @@ export default function BranchesPage() {
                       </td>
 
                       <td className="px-6 py-4">
+                        <span
+                          className={
+                            branch.is_active
+                              ? "rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700"
+                              : "rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700"
+                          }
+                        >
+                          {branch.is_active ? "Aktif" : "Nonaktif"}
+                        </span>
+                      </td>
+
+                      <td className="px-6 py-4">
                         <div className="flex gap-2">
                           <button
                             onClick={() => openEditForm(branch)}
@@ -334,13 +378,17 @@ export default function BranchesPage() {
                           </button>
 
                           <button
-                            onClick={() => handleDelete(branch)}
-                            className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                            onClick={() => handleToggleStatus(branch)}
+                            className={
+                              branch.is_active
+                                ? "rounded-md border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                                : "rounded-md border border-green-300 px-3 py-2 text-sm text-green-600 hover:bg-green-50"
+                            }
                           >
-                            Hapus
+                            {branch.is_active ? "Nonaktifkan" : "Aktifkan"}
                           </button>
                         </div>
-                      </td>
+                      </td> 
                     </tr>
                   ))
                 )}

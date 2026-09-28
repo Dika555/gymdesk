@@ -65,26 +65,139 @@ export default function TrainerDetailPage({
     const [packages, setPackages] = useState<TrainerPackage[]>([]);
     const [members, setMembers] = useState<TrainerMember[]>([]);
     const [availableMembers, setAvailableMembers] = useState<AvailableMember[]>([]);
+
+    const [memberSearch, setMemberSearch] = useState("");
+    const [memberFilter, setMemberFilter] = useState<
+        "all" | "active" | "inactive"
+    >("all");
+
     const [isMemberFormOpen, setIsMemberFormOpen] = useState(false);
     const [selectedMemberId, setSelectedMemberId] = useState("");
     const [savingMember, setSavingMember] = useState(false);
     const [packageMembers, setPackageMembers] = useState<TrainerPackageMember[]>([]);
+    const [packageMemberSearch, setPackageMemberSearch] = useState("");
+
+    const [packageMemberFilter, setPackageMemberFilter] = useState<
+        "all" | "active" | "history"
+    >("all");
+
+    const [packageMemberPage, setPackageMemberPage] = useState(1);
+
+    const packageMembersPerPage = 5;
+
+    const filteredPackageMembers = packageMembers.filter((item) => {
+        const search = packageMemberSearch.trim().toLowerCase();
+
+        const matchesSearch =
+            item.member_name.toLowerCase().includes(search) ||
+            item.package_name.toLowerCase().includes(search);
+
+        if (!matchesSearch) {
+            return false;
+        }
+
+        if (packageMemberFilter === "active") {
+            return item.status === "active" && item.remaining_sessions > 0;
+        }
+
+        if (packageMemberFilter === "history") {
+            return (
+                item.status === "completed" ||
+                item.status === "cancelled" ||
+                item.remaining_sessions <= 0
+            );
+        }
+
+        return true;
+    });
+
+    const packageMemberTotalPages = Math.ceil(
+        filteredPackageMembers.length / packageMembersPerPage
+    );
+
+    const paginatedPackageMembers = filteredPackageMembers.slice(
+        (packageMemberPage - 1) * packageMembersPerPage,
+        packageMemberPage * packageMembersPerPage
+    );
+
+    const filteredMembers = members.filter((item) => {
+        const search = memberSearch.trim().toLowerCase();
+
+        const matchesSearch = item.name.toLowerCase().includes(search);
+
+        if (!matchesSearch) {
+            return false;
+        }
+
+        if (memberFilter === "active") {
+            return item.has_active_package;
+        }
+
+        if (memberFilter === "inactive") {
+            return !item.has_active_package;
+        }
+
+        return true;
+    });
 
     const activePackageMembers = packageMembers.filter(
-        (item) => item.status === "active" && item.remaining_sessions > 0
+        (item: TrainerPackageMember) =>
+            item.status === "active" && item.remaining_sessions > 0
     );
 
-    const completedPackageMembers = packageMembers.filter(
-        (item) =>
-            item.status === "completed" ||
-            item.status === "cancelled" ||
-            item.remaining_sessions <= 0
-    );
     const [sessions, setSessions] = useState<TrainerSession[]>([]);
+    const [sessionTypeFilter, setSessionTypeFilter] = useState<
+        "all" | "package" | "single"
+    >("all");
+    const [sessionPaymentFilter, setSessionPaymentFilter] = useState<
+        "all" | "cash" | "qris" | "transfer"
+    >("all");
+
     const [sessionSearch, setSessionSearch] = useState("");
+    const [sessionPage, setSessionPage] = useState(1);
+
+    const sessionsPerPage = 5;
     const [sessionStartDate, setSessionStartDate] = useState("");
     const [sessionEndDate, setSessionEndDate] = useState("");
 
+    const filteredSessions = sessions.filter((session) => {
+        const search = sessionSearch.trim().toLowerCase();
+
+        const matchesSearch =
+            session.member_name.toLowerCase().includes(search) ||
+            (session.notes ?? "").toLowerCase().includes(search);
+
+        const matchesType =
+            sessionTypeFilter === "all" ||
+            session.session_type === sessionTypeFilter;
+
+        const matchesPayment =
+            sessionPaymentFilter === "all" ||
+            session.payment_method === sessionPaymentFilter;
+
+        const matchesStartDate =
+            !sessionStartDate || session.session_date >= sessionStartDate;
+
+        const matchesEndDate =
+            !sessionEndDate || session.session_date <= sessionEndDate;
+
+        return (
+            matchesSearch &&
+            matchesType &&
+            matchesPayment &&
+            matchesStartDate &&
+            matchesEndDate
+        );
+    });
+
+    const sessionTotalPages = Math.ceil(
+        filteredSessions.length / sessionsPerPage
+    );
+
+    const paginatedSessions = filteredSessions.slice(
+        (sessionPage - 1) * sessionsPerPage,
+        sessionPage * sessionsPerPage
+    );
     const [isEditing, setIsEditing] = useState(false);
     const [name, setName] = useState("");
     const [phone, setPhone] = useState("");
@@ -749,6 +862,35 @@ export default function TrainerDetailPage({
         alert("Paket berhasil dinonaktifkan.");
     }
 
+    async function activatePackage(packageId: string) {
+        const confirmed = window.confirm(
+            "Yakin ingin mengaktifkan kembali paket ini?"
+        );
+
+        if (!confirmed) return;
+
+        const supabase = createClient();
+
+        const { error } = await supabase
+            .from("trainer_packages")
+            .update({
+                status: "active",
+            })
+            .eq("id", packageId);
+
+        if (error) {
+            console.error("Gagal mengaktifkan paket:", error);
+            alert(error.message);
+            return;
+        }
+
+        const { id } = await params;
+
+        await loadPackages(id);
+
+        alert("Paket berhasil diaktifkan kembali.");
+    }
+
     async function updateTrainer(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
 
@@ -834,6 +976,45 @@ export default function TrainerDetailPage({
         });
 
         alert("Trainer berhasil dinonaktifkan.");
+    }
+
+    async function activateTrainer() {
+        if (!trainer) return;
+
+        const confirmed = window.confirm(
+            "Yakin ingin mengaktifkan kembali trainer ini?"
+        );
+
+        if (!confirmed) return;
+
+        const supabase = createClient();
+        const branchId = getActiveBranchId();
+
+        if (!branchId) {
+            alert("Cabang aktif belum dipilih.");
+            return;
+        }
+
+        const { error } = await supabase
+            .from("trainers")
+            .update({
+                status: "active",
+            })
+            .eq("id", trainer.id)
+            .eq("branch_id", branchId);
+
+        if (error) {
+            console.error("Gagal mengaktifkan trainer:", error);
+            alert(error.message);
+            return;
+        }
+
+        setTrainer({
+            ...trainer,
+            status: "active",
+        });
+
+        alert("Trainer berhasil diaktifkan kembali.");
     }
 
     async function addSession(
@@ -1036,48 +1217,93 @@ export default function TrainerDetailPage({
             </button>
 
             <div className="rounded-xl bg-white p-6 shadow">
-                <h1 className="text-3xl font-bold">{trainer.name}</h1>
+                <div className="border-b border-zinc-200 pb-5">
+                    <h1 className="text-2xl font-bold text-zinc-900">
+                        Profil Trainer
+                    </h1>
 
-                <div className="mt-5 space-y-2">
-                    <p>
-                        <span className="font-medium">Nomor HP:</span>{" "}
-                        {trainer.phone}
-                    </p>
-
-                    <p>
-                        <span className="font-medium">Spesialisasi:</span>{" "}
-                        {trainer.specialization}
-                    </p>
-
-                    <p>
-                        <span className="font-medium">Harga per sesi:</span>{" "}
-                        Rp{trainer.price_per_session.toLocaleString("id-ID")}
-                    </p>
-
-                    <p>
-                        <span className="font-medium">Status:</span>{" "}
-                        {trainer.status === "active"
-                            ? "Aktif"
-                            : "Tidak Aktif"}
+                    <p className="mt-1 text-sm text-zinc-500">
+                        Informasi lengkap mengenai trainer.
                     </p>
                 </div>
 
-                <div className="mt-6">
+                <div className="mt-6 grid gap-x-8 gap-y-5 sm:grid-cols-2">
+                    <div>
+                        <p className="text-sm text-zinc-500">
+                            Nama Trainer
+                        </p>
+
+                        <p className="mt-1 font-medium text-zinc-900">
+                            {trainer.name}
+                        </p>
+                    </div>
+
+                    <div>
+                        <p className="text-sm text-zinc-500">
+                            Nomor HP
+                        </p>
+
+                        <p className="mt-1 font-medium text-zinc-900">
+                            {trainer.phone}
+                        </p>
+                    </div>
+
+                    <div>
+                        <p className="text-sm text-zinc-500">
+                            Spesialisasi
+                        </p>
+
+                        <p className="mt-1 font-medium text-zinc-900">
+                            {trainer.specialization}
+                        </p>
+                    </div>
+
+                    <div>
+                        <p className="text-sm text-zinc-500">
+                            Harga per Sesi
+                        </p>
+
+                        <p className="mt-1 font-medium text-zinc-900">
+                            Rp{trainer.price_per_session.toLocaleString("id-ID")}
+                        </p>
+                    </div>
+
+                    <div>
+                        <p className="text-sm text-zinc-500">
+                            Status
+                        </p>
+
+                        <p className="mt-1 font-medium text-zinc-900">
+                            {trainer.status === "active"
+                                ? "Aktif"
+                                : "Tidak Aktif"}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="mt-6 flex gap-3 border-t border-zinc-200 pt-5">
                     <button
+                        type="button"
                         onClick={startEditing}
-                        className="rounded-lg bg-black px-4 py-2 text-sm text-white hover:bg-gray-800 mr-1"
+                        className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
                     >
                         Edit Trainer
                     </button>
 
                     <button
                         type="button"
-                        onClick={deactivateTrainer}
-                        disabled={trainer.status === "inactive"}
-                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-zinc-300 ml-1"
+                        onClick={
+                            trainer.status === "inactive"
+                                ? activateTrainer
+                                : deactivateTrainer
+                        }
+                        className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${trainer.status === "inactive"
+                            ? "bg-green-600 hover:bg-green-700"
+                            : "bg-red-600 hover:bg-red-700"
+                            }`}
                     >
                         {trainer.status === "inactive"
-                            ? "Trainer Tidak Aktif"
+                            ? "Aktifkan Kembali"
                             : "Nonaktifkan Trainer"}
                     </button>
                 </div>
@@ -1208,6 +1434,30 @@ export default function TrainerDetailPage({
                             + Tambah Member
                         </button>
                     </div>
+                </div>
+
+                <div className="mt-5 flex flex-col gap-3 md:flex-row">
+                    <input
+                        type="text"
+                        value={memberSearch}
+                        onChange={(e) => setMemberSearch(e.target.value)}
+                        placeholder="Cari nama member..."
+                        className="w-full rounded-lg border border-zinc-200 px-4 py-2.5 text-sm outline-none focus:border-orange-500 md:flex-1"
+                    />
+
+                    <select
+                        value={memberFilter}
+                        onChange={(e) =>
+                            setMemberFilter(
+                                e.target.value as "all" | "active" | "inactive"
+                            )
+                        }
+                        className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm outline-none focus:border-orange-500"
+                    >
+                        <option value="all">Semua Status</option>
+                        <option value="active">Punya Paket Aktif</option>
+                        <option value="inactive">Tidak Ada Paket Aktif</option>
+                    </select>
                 </div>
 
                 {isMemberFormOpen && (
@@ -1522,13 +1772,21 @@ export default function TrainerDetailPage({
                                         Edit
                                     </button>
 
-                                    {item.status === "active" && (
+                                    {item.status === "active" ? (
                                         <button
                                             type="button"
                                             onClick={() => deactivatePackage(item.id)}
                                             className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
                                         >
                                             Nonaktifkan
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => activatePackage(item.id)}
+                                            className="rounded-lg border border-green-200 px-3 py-2 text-sm text-green-600 hover:bg-green-50"
+                                        >
+                                            Aktifkan Kembali
                                         </button>
                                     )}
                                 </div>
@@ -1539,14 +1797,15 @@ export default function TrainerDetailPage({
             </div>
 
             <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-6">
-                <div className="flex items-center justify-between">
+                {/* Header */}
+                <div className="flex items-start justify-between gap-4">
                     <div>
                         <h2 className="text-lg font-semibold text-zinc-900">
                             Sesi Trainer
                         </h2>
 
                         <p className="mt-1 text-sm text-zinc-500">
-                            Catat sesi latihan member bersama trainer.
+                            Catat dan lihat riwayat sesi latihan bersama trainer.
                         </p>
                     </div>
 
@@ -1565,218 +1824,332 @@ export default function TrainerDetailPage({
                             setSessionNotes("");
                             setIsSessionFormOpen(true);
                         }}
-                        disabled={trainer.status === "inactive"}
-                        className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600"
+                        className="shrink-0 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600"
                     >
                         + Catat Sesi
                     </button>
                 </div>
 
-                <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-6">
-                    <div>
-                        <h2 className="text-lg font-semibold text-zinc-900">
-                            Riwayat Sesi
-                        </h2>
-
-                        <p className="mt-1 text-sm text-zinc-500">
-                            Riwayat sesi latihan member bersama trainer.
-                        </p>
-                    </div>
-
-                    <div className="mt-5 flex flex-wrap items-end gap-3">
-
-                        <div className="min-w-[220px] flex-1">
-                            <label className="mb-1 block text-xs font-medium text-zinc-600">
-                                Cari pelanggan
+                {/* Search & Filter */}
+                <div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+                        {/* Search */}
+                        <div className="lg:col-span-2">
+                            <label className="text-xs font-medium text-zinc-600">
+                                Cari
                             </label>
 
                             <input
                                 type="text"
                                 value={sessionSearch}
-                                onChange={(e) => setSessionSearch(e.target.value)}
-                                placeholder="Nama member atau non-member..."
-                                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-orange-500"
+                                onChange={(e) => {
+                                    setSessionSearch(e.target.value);
+                                    setSessionPage(1);
+                                }}
+                                placeholder="Cari pelanggan atau catatan..."
+                                className="mt-1.5 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                             />
                         </div>
 
+                        {/* Jenis Sesi */}
                         <div>
-                            <label className="mb-1 block text-xs font-medium text-zinc-600">
-                                Dari
+                            <label className="text-xs font-medium text-zinc-600">
+                                Jenis Sesi
+                            </label>
+
+                            <select
+                                value={sessionTypeFilter}
+                                onChange={(e) => {
+                                    setSessionTypeFilter(
+                                        e.target.value as "all" | "package" | "single"
+                                    );
+                                    setSessionPage(1);
+                                }}
+                                className="mt-1.5 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                            >
+                                <option value="all">Semua Jenis</option>
+                                <option value="package">Paket</option>
+                                <option value="single">Per Sesi</option>
+                            </select>
+                        </div>
+
+                        {/* Pembayaran */}
+                        <div>
+                            <label className="text-xs font-medium text-zinc-600">
+                                Pembayaran
+                            </label>
+
+                            <select
+                                value={sessionPaymentFilter}
+                                onChange={(e) => {
+                                    setSessionTypeFilter(
+                                        e.target.value as "all" | "package" | "single"
+                                    );
+                                    setSessionPage(1);
+                                }}
+                                className="mt-1.5 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                            >
+                                <option value="all">Semua Pembayaran</option>
+                                <option value="cash">Cash</option>
+                                <option value="qris">QRIS</option>
+                                <option value="transfer">
+                                    Transfer
+                                </option>
+                            </select>
+                        </div>
+
+                        {/* Reset */}
+                        <div className="flex items-end">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSessionSearch("");
+                                    setSessionTypeFilter("all");
+                                    setSessionPaymentFilter("all");
+                                    setSessionStartDate("");
+                                    setSessionEndDate("");
+                                    setSessionPage(1);
+                                }}
+                                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+                            >
+                                Reset
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Filter Tanggal */}
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div>
+                            <label className="text-xs font-medium text-zinc-600">
+                                Dari Tanggal
                             </label>
 
                             <input
                                 type="date"
                                 value={sessionStartDate}
-                                onChange={(e) => setSessionStartDate(e.target.value)}
-                                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-orange-500"
+                                onChange={(e) => {
+                                    setSessionStartDate(e.target.value);
+                                    setSessionPage(1);
+                                }}
+                                className="mt-1.5 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                             />
                         </div>
 
                         <div>
-                            <label className="mb-1 block text-xs font-medium text-zinc-600">
-                                Sampai
+                            <label className="text-xs font-medium text-zinc-600">
+                                Sampai Tanggal
                             </label>
 
                             <input
                                 type="date"
                                 value={sessionEndDate}
-                                onChange={(e) => setSessionEndDate(e.target.value)}
-                                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-orange-500"
+                                onChange={(e) => {
+                                    setSessionEndDate(e.target.value);
+                                    setSessionPage(1);
+                                }}
+                                className="mt-1.5 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                             />
                         </div>
-
-                        <button
-                            type="button"
-                            onClick={async () => {
-                                await loadSessions(trainer.id,);
-                            }}
-                            className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600">
-                            Terapkan
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={async () => {
-                                setSessionStartDate("");
-                                setSessionEndDate("");
-
-                                const supabase = createClient();
-
-                                const { id } = await params;
-
-                                await loadSessions(id);
-                            }}
-                            className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-                        >
-                            Reset
-                        </button>
-                    </div>
-
-                    <div className="mt-5 max-h-80 overflow-x-auto">
-                        {sessions.length === 0 ? (
-                            <p className="text-sm text-zinc-500">
-                                Belum ada riwayat sesi.
-                            </p>
-                        ) : (
-                            <table className="w-full text-left text-sm">
-                                <thead>
-                                    <tr className="border-b border-zinc-200 text-zinc-500">
-                                        <th className="px-3 py-3 font-medium">
-                                            No
-                                        </th>
-
-                                        <th className="px-3 py-3 font-medium">
-                                            Pelanggan
-                                        </th>
-
-                                        <th className="px-3 py-3 font-medium">
-                                            Jenis
-                                        </th>
-
-                                        <th className="px-3 py-3 font-medium">
-                                            Tanggal Sesi
-                                        </th>
-
-                                        <th className="px-3 py-3 font-medium">
-                                            Harga
-                                        </th>
-
-                                        <th className="px-3 py-3 font-medium">
-                                            Pembayaran
-                                        </th>
-
-                                        <th className="px-3 py-3 font-medium">
-                                            Catatan
-                                        </th>
-                                    </tr>
-                                </thead>
-
-                                <tbody>
-                                    {sessions.map((session, index) => (
-                                        <tr
-                                            key={session.id}
-                                            className="border-b border-zinc-100"
-                                        >
-                                            <td className="px-3 py-3 text-zinc-600">
-                                                {index + 1}
-                                            </td>
-
-                                            <td className="px-3 py-3 font-medium text-zinc-900">
-                                                {session.member_name}
-                                            </td>
-
-                                            <td className="px-3 py-3 text-zinc-600">
-                                                {session.session_type === "package"
-                                                    ? "Paket"
-                                                    : "Per Sesi"}
-                                            </td>
-
-                                            <td className="px-3 py-3 text-zinc-600">
-                                                {new Date(
-                                                    session.session_date
-                                                ).toLocaleDateString("id-ID")}
-                                            </td>
-
-                                            <td className="px-3 py-3 text-zinc-600">
-                                                Rp{" "}
-                                                {Number(
-                                                    session.price
-                                                ).toLocaleString("id-ID")}
-                                            </td>
-
-                                            <td className="px-3 py-3 text-zinc-600">
-                                                {session.payment_method
-                                                    ? session.payment_method.toUpperCase()
-                                                    : "-"}
-                                            </td>
-
-                                            <td className="px-3 py-3 text-zinc-600">
-                                                {session.notes || "-"}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
                     </div>
                 </div>
 
-                {isSessionFormOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-                        <form
-                            onSubmit={addSession}
-                            className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl"
-                        >
-                            <div className="flex items-center justify-between">
+                {/* Jumlah Data */}
+                <div className="mt-4 text-sm text-zinc-500">
+                    Menampilkan{" "}
+                    <span className="font-medium text-zinc-700">
+                        {filteredSessions.length}
+                    </span>{" "}
+                    dari{" "}
+                    <span className="font-medium text-zinc-700">
+                        {sessions.length}
+                    </span>{" "}
+                    sesi
+                </div>
+
+                {/* Tabel Riwayat */}
+                <div className="mt-3 overflow-x-auto rounded-xl border border-zinc-200">
+                    {filteredSessions.length === 0 ? (
+                        <div className="px-4 py-10 text-center text-sm text-zinc-500">
+                            Tidak ada riwayat sesi yang sesuai.
+                        </div>
+                    ) : (
+                        <table className="min-w-[950px] w-full table-fixed text-left text-sm">
+                            <thead className="bg-zinc-50">
+                                <tr className="border-b border-zinc-200 text-zinc-500">
+                                    <th className="w-14 px-4 py-3 font-medium">
+                                        No
+                                    </th>
+
+                                    <th className="w-44 px-4 py-3 font-medium">
+                                        Pelanggan
+                                    </th>
+
+                                    <th className="w-28 px-4 py-3 font-medium">
+                                        Jenis
+                                    </th>
+
+                                    <th className="w-32 px-4 py-3 font-medium">
+                                        Tanggal Sesi
+                                    </th>
+
+                                    <th className="w-36 px-4 py-3 font-medium">
+                                        Harga
+                                    </th>
+
+                                    <th className="w-32 px-4 py-3 font-medium">
+                                        Pembayaran
+                                    </th>
+
+                                    <th className="px-4 py-3 font-medium">
+                                        Catatan
+                                    </th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {paginatedSessions.map((session, index) => (
+                                    <tr
+                                        key={session.id}
+                                        className="border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50"
+                                    >
+                                        <td className="px-4 py-3 text-zinc-600">
+                                            {(sessionPage - 1) * sessionsPerPage + index + 1}
+                                        </td>
+
+                                        <td className="px-4 py-3 font-medium text-zinc-900">
+                                            {session.member_name}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-zinc-600">
+                                            {session.session_type === "package"
+                                                ? "Paket"
+                                                : "Per Sesi"}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-zinc-600">
+                                            {new Date(
+                                                session.session_date
+                                            ).toLocaleDateString("id-ID")}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-zinc-600">
+                                            Rp{" "}
+                                            {Number(
+                                                session.price
+                                            ).toLocaleString("id-ID")}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-zinc-600">
+                                            {session.payment_method
+                                                ? session.payment_method.toUpperCase()
+                                                : "-"}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-zinc-600">
+                                            <div
+                                                className="max-w-[320px] truncate"
+                                                title={session.notes ?? "-"}
+                                            >
+                                                {session.notes || "-"}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+
+                {sessionTotalPages > 1 && (
+                                <div className="mt-4 flex items-center justify-between">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSessionPage(sessionPage - 1)}
+                                        disabled={sessionPage === 1}
+                                        className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40">
+                                        ← Sebelumnya
+                                    </button>
+
+                                    <div className="flex items-center gap-1">
+                                        {Array.from(
+                                            { length: sessionTotalPages },
+                                            (_, index) => index + 1
+                                        ).map((page) => (
+                                            <button
+                                                key={page}
+                                                type="button"
+                                                onClick={() => setSessionPage(page)}
+                                                className={`h-9 min-w-9 rounded-lg px-3 text-sm font-medium ${sessionPage === page
+                                                    ? "bg-orange-500 text-white"
+                                                    : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+                                                    }`}
+                                            >
+                                                {page}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setSessionPage(sessionPage + 1)}
+                                        disabled={sessionPage === sessionTotalPages}
+                                        className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        Berikutnya →
+                                    </button>
+                                </div>
+                            )}
+            </div>
+
+            {isSessionFormOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
+                    <form
+                        onSubmit={addSession}
+                        className="w-full max-w-2xl overflow-y-auto rounded-xl bg-white shadow-xl"
+                        style={{ maxHeight: "90vh" }}
+                    >
+                        {/* Header */}
+                        <div className="flex items-start justify-between border-b border-zinc-200 px-6 py-5">
+                            <div>
                                 <h3 className="text-lg font-semibold text-zinc-900">
                                     Catat Sesi Trainer
                                 </h3>
 
-                                <button
-                                    type="button"
-                                    onClick={() => setIsSessionFormOpen(false)}
-                                    className="text-xl text-zinc-400 hover:text-zinc-600"
-                                    aria-label="Tutup"
-                                >
-                                    ×
-                                </button>
+                                <p className="mt-1 text-sm text-zinc-500">
+                                    Catat sesi latihan dengan trainer ini.
+                                </p>
                             </div>
 
-                            <div className="mt-5">
-                                <label className="text-sm text-zinc-600">
+                            <button
+                                type="button"
+                                onClick={() => setIsSessionFormOpen(false)}
+                                className="text-2xl leading-none text-zinc-400 hover:text-zinc-600"
+                                aria-label="Tutup"
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        {/* Form */}
+                        <div className="space-y-5 px-6 py-5">
+                            {/* Jenis Sesi */}
+                            <div>
+                                <label className="text-sm font-medium text-zinc-700">
                                     Jenis Sesi
                                 </label>
 
                                 <select
                                     value={sessionType}
                                     onChange={(e) => {
-                                        const value = e.target.value as "package" | "single";
+                                        const value = e.target.value as
+                                            | "package"
+                                            | "single";
 
                                         setSessionType(value);
                                         setSessionPackageMemberId("");
                                         setSessionMemberId("");
                                     }}
-                                    className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                    className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                                 >
                                     <option value="package">
                                         Gunakan Paket Member
@@ -1786,40 +2159,112 @@ export default function TrainerDetailPage({
                                         Bayar Per Sesi
                                     </option>
                                 </select>
+
+                                <p className="mt-1.5 text-xs text-zinc-500">
+                                    Pilih apakah sesi menggunakan paket yang sudah dibeli
+                                    atau dibayar secara langsung.
+                                </p>
                             </div>
 
-                            <div className="mt-5 grid gap-4 md:grid-cols-2">
-                                {sessionType === "package" && (
-                                    <div>
-                                        <label className="text-sm text-zinc-600">
-                                            Paket Member
-                                        </label>
+                            {/* ==================== */}
+                            {/* PAKET MEMBER */}
+                            {/* ==================== */}
+                            {sessionType === "package" && (
+                                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                                    <div className="mb-4">
+                                        <h4 className="text-sm font-semibold text-zinc-800">
+                                            Penggunaan Paket
+                                        </h4>
 
-                                        <select
-                                            value={sessionPackageMemberId}
-                                            onChange={(e) =>
-                                                setSessionPackageMemberId(e.target.value)
-                                            }
-                                            required
-                                            className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
-                                        >
-                                            <option value="">
-                                                Pilih Paket Member
-                                            </option>
-
-                                            {activePackageMembers.map((item) => (
-                                                <option key={item.id} value={item.id}>
-                                                    {item.member_name} - {item.remaining_sessions} sesi tersisa
-                                                </option>
-                                            ))}
-                                        </select>
+                                        <p className="mt-1 text-xs text-zinc-500">
+                                            Sesi akan menggunakan satu sesi dari paket
+                                            member yang dipilih.
+                                        </p>
                                     </div>
-                                )}
 
-                                {sessionType === "single" && (
-                                    <>
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="md:col-span-2">
+                                            <label className="text-sm font-medium text-zinc-700">
+                                                Paket Member
+                                            </label>
+
+                                            <select
+                                                value={sessionPackageMemberId}
+                                                onChange={(e) =>
+                                                    setSessionPackageMemberId(
+                                                        e.target.value
+                                                    )
+                                                }
+                                                required
+                                                className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                                            >
+                                                <option value="">
+                                                    Pilih paket member
+                                                </option>
+
+                                                {activePackageMembers.map((item) => (
+                                                    <option
+                                                        key={item.id}
+                                                        value={item.id}
+                                                    >
+                                                        {item.member_name} -{" "}
+                                                        {item.package_name} (
+                                                        {item.remaining_sessions} sesi
+                                                        tersisa)
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+
                                         <div>
-                                            <label className="text-sm text-zinc-600">
+                                            <label className="text-sm font-medium text-zinc-700">
+                                                Tanggal Sesi
+                                            </label>
+
+                                            <input
+                                                type="date"
+                                                value={sessionDate}
+                                                onChange={(e) =>
+                                                    setSessionDate(e.target.value)
+                                                }
+                                                required
+                                                className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="text-sm font-medium text-zinc-700">
+                                                Biaya Sesi
+                                            </label>
+
+                                            <div className="mt-2 rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm font-medium text-zinc-700">
+                                                Termasuk paket
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ==================== */}
+                            {/* BAYAR PER SESI */}
+                            {/* ==================== */}
+                            {sessionType === "single" && (
+                                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                                    <div className="mb-4">
+                                        <h4 className="text-sm font-semibold text-zinc-800">
+                                            Pembayaran Per Sesi
+                                        </h4>
+
+                                        <p className="mt-1 text-xs text-zinc-500">
+                                            Sesi ini tidak menggunakan paket dan akan
+                                            dicatat sebagai transaksi baru.
+                                        </p>
+                                    </div>
+
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        {/* Tipe Pelanggan */}
+                                        <div>
+                                            <label className="text-sm font-medium text-zinc-700">
                                                 Tipe Pelanggan
                                             </label>
 
@@ -1834,7 +2279,7 @@ export default function TrainerDetailPage({
                                                     setSessionMemberId("");
                                                     setSessionVisitorName("");
                                                 }}
-                                                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                                className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                                             >
                                                 <option value="member">
                                                     Member
@@ -1846,22 +2291,25 @@ export default function TrainerDetailPage({
                                             </select>
                                         </div>
 
+                                        {/* Member / Non-member */}
                                         {sessionCustomerType === "member" ? (
                                             <div>
-                                                <label className="text-sm text-zinc-600">
+                                                <label className="text-sm font-medium text-zinc-700">
                                                     Member
                                                 </label>
 
                                                 <select
                                                     value={sessionMemberId}
                                                     onChange={(e) =>
-                                                        setSessionMemberId(e.target.value)
+                                                        setSessionMemberId(
+                                                            e.target.value
+                                                        )
                                                     }
                                                     required
-                                                    className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                                    className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                                                 >
                                                     <option value="">
-                                                        Pilih Member
+                                                        Pilih member
                                                     </option>
 
                                                     {members.map((member) => (
@@ -1876,7 +2324,7 @@ export default function TrainerDetailPage({
                                             </div>
                                         ) : (
                                             <div>
-                                                <label className="text-sm text-zinc-600">
+                                                <label className="text-sm font-medium text-zinc-700">
                                                     Nama Pelanggan
                                                 </label>
 
@@ -1884,21 +2332,24 @@ export default function TrainerDetailPage({
                                                     type="text"
                                                     value={sessionVisitorName}
                                                     onChange={(e) =>
-                                                        setSessionVisitorName(e.target.value)
+                                                        setSessionVisitorName(
+                                                            e.target.value
+                                                        )
                                                     }
                                                     required
                                                     placeholder="Masukkan nama pelanggan"
-                                                    className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                                    className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                                                 />
                                             </div>
                                         )}
 
+                                        {/* Harga */}
                                         <div>
-                                            <label className="text-sm text-zinc-600">
+                                            <label className="text-sm font-medium text-zinc-700">
                                                 Harga Per Sesi
                                             </label>
 
-                                            <div className="mt-1 rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                                            <div className="mt-2 rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm font-semibold text-zinc-800">
                                                 Rp{" "}
                                                 {Number(
                                                     trainer?.price_per_session ?? 0
@@ -1906,18 +2357,21 @@ export default function TrainerDetailPage({
                                             </div>
                                         </div>
 
+                                        {/* Pembayaran */}
                                         <div>
-                                            <label className="text-sm text-zinc-600">
+                                            <label className="text-sm font-medium text-zinc-700">
                                                 Metode Pembayaran
                                             </label>
 
                                             <select
                                                 value={sessionPaymentMethod}
                                                 onChange={(e) =>
-                                                    setSessionPaymentMethod(e.target.value)
+                                                    setSessionPaymentMethod(
+                                                        e.target.value
+                                                    )
                                                 }
                                                 required
-                                                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                                className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                                             >
                                                 <option value="cash">Cash</option>
                                                 <option value="qris">QRIS</option>
@@ -1926,70 +2380,70 @@ export default function TrainerDetailPage({
                                                 </option>
                                             </select>
                                         </div>
-                                    </>
-                                )}
 
-                                <div>
-                                    <label className="text-sm text-zinc-600">
-                                        Tanggal Sesi
-                                    </label>
+                                        {/* Tanggal */}
+                                        <div>
+                                            <label className="text-sm font-medium text-zinc-700">
+                                                Tanggal Sesi
+                                            </label>
 
-                                    <input
-                                        type="date"
-                                        value={sessionDate}
-                                        onChange={(e) => setSessionDate(e.target.value)}
-                                        required
-                                        className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
-                                    />
+                                            <input
+                                                type="date"
+                                                value={sessionDate}
+                                                onChange={(e) =>
+                                                    setSessionDate(e.target.value)
+                                                }
+                                                required
+                                                className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
-
-                                <div className="md:col-span-2">
-                                    <label className="text-sm text-zinc-600">
-                                        Catatan
-                                    </label>
-
-                                    <textarea
-                                        value={sessionNotes}
-                                        onChange={(e) =>
-                                            setSessionNotes(e.target.value)
-                                        }
-                                        rows={3}
-                                        placeholder="Catatan sesi (opsional)"
-                                        className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
-                                    />
-                                </div>
-                            </div>
-
-                            {sessionType === "single" && (
-                                <>
-
-                                </>
                             )}
 
-                            <div className="mt-6 flex justify-end gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsSessionFormOpen(false)}
-                                    className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-                                >
-                                    Batal
-                                </button>
+                            {/* Catatan */}
+                            <div>
+                                <label className="text-sm font-medium text-zinc-700">
+                                    Catatan
+                                </label>
 
-                                <button
-                                    type="submit"
-                                    disabled={savingSession}
-                                    className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
-                                >
-                                    {savingSession
-                                        ? "Menyimpan..."
-                                        : "Simpan Sesi"}
-                                </button>
+                                <textarea
+                                    value={sessionNotes}
+                                    onChange={(e) =>
+                                        setSessionNotes(e.target.value)
+                                    }
+                                    rows={3}
+                                    placeholder="Catatan sesi (opsional)"
+                                    className="mt-2 w-full resize-none rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                                />
                             </div>
-                        </form>
-                    </div>
-                )}
-            </div>
+                        </div>
 
+                        {/* Footer */}
+                        <div className="flex justify-end gap-2 border-t border-zinc-200 bg-zinc-50 px-6 py-4">
+                            <button
+                                type="button"
+                                onClick={() => setIsSessionFormOpen(false)}
+                                className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+                            >
+                                Batal
+                            </button>
+
+                            <button
+                                type="submit"
+                                disabled={savingSession}
+                                className="rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {savingSession
+                                    ? "Menyimpan..."
+                                    : "Simpan Sesi"}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+            {/* Paket Member */}
             <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-6">
                 <div className="flex items-center justify-between">
                     <div>
@@ -2189,133 +2643,190 @@ export default function TrainerDetailPage({
                     </div>
                 )}
 
-                <div className="mt-5 space-y-6">
-                    {/* Paket aktif */}
-                    <div>
-                        <div className="mb-3 flex items-center justify-between">
-                            <h3 className="font-medium text-zinc-900">
-                                Paket Member Aktif
-                            </h3>
+                <div className="mt-5 flex flex-col gap-3 md:flex-row">
+                    <input
+                        type="text"
+                        value={packageMemberSearch}
+                        onChange={(e) => setPackageMemberSearch(e.target.value)}
+                        placeholder="Cari member atau paket..."
+                        className="w-full rounded-lg border border-zinc-200 px-4 py-2.5 text-sm outline-none focus:border-orange-500 md:flex-1"
+                    />
 
-                            <span className="text-sm text-zinc-500">
-                                {activePackageMembers.length} paket
-                            </span>
-                        </div>
+                    <select
+                        value={packageMemberFilter}
+                        onChange={(e) =>
+                            setPackageMemberFilter(
+                                e.target.value as "all" | "active" | "history"
+                            )
+                        }
+                        className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm outline-none focus:border-orange-500"
+                    >
+                        <option value="all">Semua Status</option>
+                        <option value="active">Aktif</option>
+                        <option value="history">Riwayat</option>
+                    </select>
+                </div>
 
-                        {activePackageMembers.length === 0 ? (
-                            <div className="rounded-lg border border-dashed border-zinc-300 px-4 py-6 text-center">
-                                <p className="text-sm text-zinc-500">
-                                    Belum ada paket member yang aktif.
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {activePackageMembers.map((item) => (
-                                    <div
+                <div className="mt-5 overflow-x-auto">
+                    {packageMembers.length === 0 ? (
+                        <p className="py-6 text-center text-sm text-zinc-500">
+                            Belum ada paket member.
+                        </p>
+                    ) : (
+                        <table className="w-full text-left text-sm">
+                            <thead>
+                                <tr className="border-b border-zinc-200 text-zinc-500">
+                                    <th className="px-3 py-3 font-medium">
+                                        No
+                                    </th>
+
+                                    <th className="px-3 py-3 font-medium">
+                                        Member
+                                    </th>
+
+                                    <th className="px-3 py-3 font-medium">
+                                        Paket
+                                    </th>
+
+                                    <th className="px-3 py-3 font-medium">
+                                        Sesi
+                                    </th>
+
+                                    <th className="px-3 py-3 font-medium">
+                                        Tanggal Beli
+                                    </th>
+
+                                    <th className="px-3 py-3 font-medium">
+                                        Status
+                                    </th>
+
+                                    <th className="px-3 py-3 text-right font-medium">
+                                        Aksi
+                                    </th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {paginatedPackageMembers.map((item, index) => (
+                                    <tr
                                         key={item.id}
-                                        className="rounded-lg border border-zinc-200 p-4"
+                                        className="border-b border-zinc-100"
                                     >
-                                        <div className="flex items-center justify-between">
-                                            <div>
-                                                <p className="font-medium text-zinc-900">
-                                                    {item.member_name}
-                                                </p>
+                                        <td className="px-4 py-3 text-zinc-600">
+                                            {(packageMemberPage - 1) * packageMembersPerPage + index + 1}
+                                        </td>
 
-                                                <p className="mt-1 text-sm text-zinc-500">
-                                                    {item.package_name}
-                                                </p>
-                                            </div>
+                                        <td className="px-3 py-3 font-medium text-zinc-900">
+                                            {item.member_name}
+                                        </td>
 
-                                            <div className="text-right">
-                                                <p className="text-sm font-medium text-zinc-900">
-                                                    {item.remaining_sessions} /{" "}
-                                                    {item.total_sessions} sesi
-                                                </p>
+                                        <td className="px-3 py-3 text-zinc-600">
+                                            {item.package_name}
+                                        </td>
 
-                                                <p className="mt-1 text-xs text-zinc-500">
-                                                    Dibeli:{" "}
-                                                    {new Date(
-                                                        item.purchase_date
-                                                    ).toLocaleDateString("id-ID")}
-                                                </p>
+                                        <td className="px-3 py-3 text-zinc-600">
+                                            {item.remaining_sessions} /{" "}
+                                            {item.total_sessions}
+                                        </td>
 
-                                                {item.remaining_sessions === item.total_sessions && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => cancelPackageMember(item.id)}
-                                                        className="mt-2 text-xs font-medium text-red-600 hover:text-red-700"
-                                                    >
-                                                        Batalkan Paket
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Riwayat paket */}
-                    <div>
-                        <div className="mb-3 flex items-center justify-between">
-                            <h3 className="font-medium text-zinc-900">
-                                Riwayat Paket Member
-                            </h3>
-
-                            <span className="text-sm text-zinc-500">
-                                {completedPackageMembers.length} paket
-                            </span>
-                        </div>
-
-                        {completedPackageMembers.length === 0 ? (
-                            <div className="rounded-lg border border-dashed border-zinc-300 px-4 py-6 text-center">
-                                <p className="text-sm text-zinc-500">
-                                    Belum ada paket yang selesai.
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="max-h-80 space-y-3 overflow-y-auto pr-2">
-                                {completedPackageMembers.map((item) => (
-                                    <div
-                                        key={item.id}
-                                        className="rounded-lg border border-zinc-200 bg-zinc-50 p-4"
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <div>
-                                                <p className="font-medium text-zinc-900">
-                                                    {item.member_name}
-                                                </p>
-
-                                                <p className="mt-1 text-sm text-zinc-500">
-                                                    {item.package_name}
-                                                </p>
-                                            </div>
-
-                                            <div className="text-right">
-                                                <p className="text-sm font-medium text-zinc-700">
-                                                    {item.remaining_sessions} /{" "}
-                                                    {item.total_sessions} sesi
-                                                </p>
-
-                                                <p className="mt-1 text-xs text-zinc-500">
-                                                    {item.status === "cancelled" ? "Dibatalkan" : "Selesai"}
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <p className="mt-2 text-xs text-zinc-500">
-                                            Dibeli:{" "}
+                                        <td className="px-3 py-3 text-zinc-600">
                                             {new Date(
                                                 item.purchase_date
                                             ).toLocaleDateString("id-ID")}
-                                        </p>
-                                    </div>
+                                        </td>
+
+                                        <td className="px-3 py-3">
+                                            {item.status === "active" &&
+                                                item.remaining_sessions > 0 ? (
+                                                <span className="text-sm text-green-600">
+                                                    Aktif
+                                                </span>
+                                            ) : item.status === "cancelled" ? (
+                                                <span className="text-sm text-red-600">
+                                                    Dibatalkan
+                                                </span>
+                                            ) : (
+                                                <span className="text-sm text-zinc-500">
+                                                    Selesai
+                                                </span>
+                                            )}
+                                        </td>
+
+                                        <td className="px-3 py-3 text-right">
+                                            {item.status === "active" &&
+                                                item.remaining_sessions ===
+                                                item.total_sessions ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        cancelPackageMember(item.id)
+                                                    }
+                                                    disabled={
+                                                        trainer.status === "inactive"
+                                                    }
+                                                    className="text-sm font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:text-zinc-400"
+                                                >
+                                                    Batalkan
+                                                </button>
+                                            ) : (
+                                                <span className="text-sm text-zinc-400">
+                                                    -
+                                                </span>
+                                            )}
+                                        </td>
+                                    </tr>
                                 ))}
-                            </div>
-                        )}
-                    </div>
+                            </tbody>
+                        </table>
+                    )}
                 </div>
+                {packageMemberTotalPages > 1 && (
+    <div className="mt-4 flex items-center justify-between">
+        <button
+            type="button"
+            onClick={() =>
+                setPackageMemberPage(packageMemberPage - 1)
+            }
+            disabled={packageMemberPage === 1}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+            ← Sebelumnya
+        </button>
+
+        <div className="flex items-center gap-1">
+            {Array.from(
+                { length: packageMemberTotalPages },
+                (_, index) => index + 1
+            ).map((page) => (
+                <button
+                    key={page}
+                    type="button"
+                    onClick={() => setPackageMemberPage(page)}
+                    className={`h-9 min-w-9 rounded-lg px-3 text-sm font-medium ${
+                        packageMemberPage === page
+                            ? "bg-orange-500 text-white"
+                            : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+                    }`}
+                >
+                    {page}
+                </button>
+            ))}
+        </div>
+
+        <button
+            type="button"
+            onClick={() =>
+                setPackageMemberPage(packageMemberPage + 1)
+            }
+            disabled={
+                packageMemberPage === packageMemberTotalPages
+            }
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+            Berikutnya →
+        </button>
+    </div>
+)}
             </div>
         </main>
     );

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { getActiveBranchId } from "@/lib/branch";
 
 type Transaction = {
   id: string;
@@ -12,10 +14,10 @@ type Transaction = {
   transaction_date: string;
   notes: string | null;
   members: {
-  id: string;
-  name: string;
-  phone: string | null;
-} | null;
+    id: string;
+    name: string;
+    phone: string | null;
+  } | null;
 };
 
 type Membership = {
@@ -49,6 +51,13 @@ export default function TransactionDetailPage({
 
       const supabase = createClient();
 
+      const branchId = getActiveBranchId();
+
+      if (!branchId) {
+        setLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("transactions")
         .select(`
@@ -66,17 +75,19 @@ export default function TransactionDetailPage({
           )
         `)
         .eq("id", id)
+        .eq("branch_id", branchId)
         .single();
 
-     if (error) {
-      console.error(error);
-      setLoading(false);
-      return;
-    }
+      if (error) {
+        console.error(error);
+        setLoading(false);
+        return;
+      }
 
-    setTransaction(data);
-
-    setTransaction(data);
+      setTransaction({
+        ...data,
+        members: data.members ?? null,
+      });
 
       if (
         data.transaction_type === "membership" &&
@@ -98,7 +109,8 @@ export default function TransactionDetailPage({
               price
             )
           `)
-          .eq("member_id", data.members.id)
+          .eq("member_id", data.members?.id)
+          .eq("branch_id", branchId)
           .order("created_at", {
             ascending: false,
           })
@@ -106,10 +118,12 @@ export default function TransactionDetailPage({
           .maybeSingle();
 
         if (membershipError) {
-          console.error(
-            "Gagal mengambil membership:",
-            membershipError,
-          );
+          console.error("Gagal mengambil membership:", {
+            message: membershipError.message,
+            details: membershipError.details,
+            hint: membershipError.hint,
+            code: membershipError.code,
+          });
         } else {
           setMembership(membershipData);
         }
@@ -204,16 +218,27 @@ export default function TransactionDetailPage({
   }
 
   const memberName =
-  transaction.members?.name ?? "Non-member";
+    transaction.members?.name ?? "Non-member";
 
   const membershipPlan =
     membership?.membership_plans?.[0];
 
   return (
     <main className="min-h-screen bg-gray-100 p-8 text-black">
-      <h1 className="text-3xl font-bold">
-        Detail Transaksi
-      </h1>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">
+            Detail Transaksi
+          </h1>
+        </div>
+
+        <Link
+          href="/transactions"
+          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+        >
+          Kembali
+        </Link>
+      </div>
 
       <p className="mt-1 text-gray-500">
         Informasi transaksi GymDesk.
@@ -241,8 +266,12 @@ export default function TransactionDetailPage({
           </p>
 
           <p>
-            <span className="font-medium">Member:</span>{" "}
-            {memberName}
+            Nama: {transaction.members?.name ?? "-"}
+          </p>
+
+          <p>
+            Jenis Pelanggan:{" "}
+            {transaction.members ? "Member" : "Non-member"}
           </p>
 
           <p>
@@ -287,17 +316,11 @@ export default function TransactionDetailPage({
 
             <div className="mt-6 space-y-3">
               <p>
-                <span className="font-medium">
-                  Paket:
-                </span>{" "}
-                {membershipPlan?.name ?? "-"}
+                Paket: {membership.membership_plans?.[0]?.name ?? "-"}
               </p>
 
               <p>
-                <span className="font-medium">
-                  Durasi:
-                </span>{" "}
-                {membershipPlan?.duration ?? "-"} bulan
+                Durasi: {membership.membership_plans?.[0]?.duration ?? "-"} bulan
               </p>
 
               <p>

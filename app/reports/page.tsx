@@ -5,13 +5,10 @@ import MembersReport from "@/components/reports/MembersReport";
 import MembershipReport from "@/components/reports/MembershipReport";
 import VisitsReport from "@/components/reports/VisitsReport";
 import TrainersReport from "@/components/reports/TrainersReport";
-{/*kela
+import TransactionReport from "@/components/reports/TransactionReport";
+import ProductReport from "@/components/reports/ProductReport";
 
-import TransactionReport from "@/components/reports/TransactionReport"
-import ProductReport from "@/components/reports/ProductReport"
- */}
-
-
+import * as XLSX from "xlsx";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getActiveBranchId } from "@/lib/branch";
@@ -86,6 +83,31 @@ export default function ReportsPage() {
       memberCount: number;
       sessionCount: number;
       revenue: number;
+    }[]
+  >([]);
+
+  const [transactionReport, setTransactionReport] = useState<
+    {
+      id: string;
+      transactionDate: string;
+      transactionType: string;
+      memberName: string;
+      paymentMethod: string;
+      totalAmount: number;
+      status: string;
+      notes: string | null;
+    }[]
+  >([]);
+
+  const [productReport, setProductReport] = useState<
+    {
+      id: string;
+      name: string;
+      category: string;
+      price: number;
+      stockIn: number;
+      stockOut: number;
+      currentStock: number;
     }[]
   >([]);
 
@@ -261,6 +283,184 @@ export default function ReportsPage() {
     if (selectedReports.includes("trainers")) {
       await loadTrainerReport();
     }
+
+    if (selectedReports.includes("transactions")) {
+      await loadTransactionReport();
+    }
+
+    if (selectedReports.includes("products")) {
+      await loadProductReport();
+    }
+  }
+
+  function handleExportXlsx() {
+    if (!showReport) {
+      setMessage("Tampilkan laporan terlebih dahulu sebelum export.");
+      return;
+    }
+
+    const workbook = XLSX.utils.book_new();
+
+    if (selectedReports.includes("summary")) {
+      const summaryData = [
+        ["Laporan", "Nilai"],
+        ["Member Baru", summary.newMembers],
+        ["Membership Baru", summary.newMemberships],
+        ["Total Kunjungan", summary.totalVisits],
+        ["Total Transaksi", summary.totalTransactions],
+        ["Total Pendapatan", summary.totalRevenue],
+      ];
+
+      const worksheet = XLSX.utils.aoa_to_sheet(summaryData);
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        "Ringkasan"
+      );
+    }
+
+    if (selectedReports.includes("members")) {
+      const memberData = memberReport.map((member, index) => ({
+        No: index + 1,
+        Nama: member.name,
+        Telepon: member.phone ?? "-",
+        Email: member.email ?? "-",
+        Gender: member.gender ?? "-",
+        Alamat: member.address ?? "-",
+        Status: member.status ?? "-",
+        "Tanggal Daftar": member.created_at,
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(memberData);
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        "Data Member"
+      );
+    }
+
+    if (selectedReports.includes("membership")) {
+      const membershipData = membershipReport.map(
+        (membership, index) => ({
+          No: index + 1,
+          Member: membership.memberName,
+          Paket: membership.planName,
+          "Tanggal Mulai": membership.startDate,
+          "Tanggal Selesai": membership.endDate,
+          Status: membership.status,
+        })
+      );
+
+      const worksheet =
+        XLSX.utils.json_to_sheet(membershipData);
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        "Data Membership"
+      );
+    }
+
+    if (selectedReports.includes("visits")) {
+      const visitData = visitReport.map((visit, index) => ({
+        No: index + 1,
+        "Member / Pengunjung": visit.memberName,
+        "Tanggal Kunjungan": visit.visitDate,
+        Biaya: visit.visitFee,
+        Pembayaran: visit.paymentMethod ?? "-",
+        Jenis: visit.isMember ? "Member" : "Non-member",
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(visitData);
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        "Data Kunjungan"
+      );
+    }
+
+    if (selectedReports.includes("trainers")) {
+      const trainerData = trainerReport.map(
+        (trainer, index) => ({
+          No: index + 1,
+          Trainer: trainer.name,
+          "Jumlah Member": trainer.memberCount,
+          "Jumlah Sesi": trainer.sessionCount,
+          Pendapatan: trainer.revenue,
+        })
+      );
+
+      const worksheet =
+        XLSX.utils.json_to_sheet(trainerData);
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        "Data Trainer"
+      );
+    }
+
+    if (selectedReports.includes("transactions")) {
+      const transactionData = transactionReport.map(
+        (transaction, index) => ({
+          No: index + 1,
+          Tanggal: transaction.transactionDate,
+          Tipe: transaction.transactionType,
+          Member: transaction.memberName,
+          Pembayaran: transaction.paymentMethod,
+          Total: transaction.totalAmount,
+          Status: transaction.status,
+          Catatan: transaction.notes ?? "-",
+        })
+      );
+
+      const worksheet =
+        XLSX.utils.json_to_sheet(transactionData);
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        "Data Transaksi"
+      );
+    }
+
+    if (selectedReports.includes("products")) {
+      const productData = productReport.map(
+        (product, index) => ({
+          No: index + 1,
+          Produk: product.name,
+          Kategori: product.category || "-",
+          Harga: product.price,
+          "Stok Masuk": product.stockIn,
+          "Stok Keluar": product.stockOut,
+          "Stok Akhir": product.currentStock,
+        })
+      );
+
+      const worksheet =
+        XLSX.utils.json_to_sheet(productData);
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        "Data Produk & Stok"
+      );
+    }
+
+    if (workbook.SheetNames.length === 0) {
+      setMessage("Tidak ada laporan yang dapat diexport.");
+      return;
+    }
+
+    const fileName =
+      `Laporan_GymDesk_${startDate}_${endDate}.xlsx`;
+
+    XLSX.writeFile(workbook, fileName);
+
+    setMessage("Laporan berhasil diexport ke Excel.");
   }
 
   async function loadMembershipReport() {
@@ -494,14 +694,14 @@ export default function ReportsPage() {
       return;
     }
 
-    // Ambil paket trainer yang dibeli pada periode laporan
+    // Ambil transaksi dari pembelian paket trainer
     const { data: packageMembers, error: packageMemberError } =
       await supabase
         .from("trainer_package_members")
         .select(`
-        trainer_id,
-        transaction_id
-      `)
+      trainer_id,
+      transaction_id
+    `)
         .in("trainer_id", trainerIds)
         .gte("purchase_date", startDate)
         .lte("purchase_date", endDate);
@@ -512,13 +712,38 @@ export default function ReportsPage() {
       return;
     }
 
-    // Ambil transaksi dari pembelian paket trainer
+    // Ambil sesi trainer per sesi pada periode laporan
+    const { data: singleSessions, error: singleSessionError } =
+      await supabase
+        .from("trainer_sessions")
+        .select(`
+      trainer_id,
+      transaction_id
+    `)
+        .in("trainer_id", trainerIds)
+        .gte("session_date", startDate)
+        .lte("session_date", endDate)
+        .eq("status", "completed");
+
+    if (singleSessionError) {
+      console.error(singleSessionError);
+      setMessage("Gagal mengambil transaksi sesi trainer.");
+      return;
+    }
+
+    // Gabungkan semua transaction_id dari:
+    // 1. pembelian paket trainer
+    // 2. pembayaran PT per sesi
     const transactionIds = [
-      ...new Set(
-        (packageMembers ?? [])
+      ...new Set([
+        ...(packageMembers ?? [])
           .map((item) => item.transaction_id)
-          .filter((id): id is string => Boolean(id))
-      ),
+          .filter((id): id is string => Boolean(id)),
+
+        ...(singleSessions ?? [])
+          .map((item) => item.transaction_id)
+          .filter((id): id is string => Boolean(id)),
+      ]),
     ];
 
     let transactions: {
@@ -542,7 +767,6 @@ export default function ReportsPage() {
 
       transactions = transactionData ?? [];
     }
-
     // Buat map jumlah member per trainer
     const memberCountMap = new Map<string, number>();
 
@@ -574,6 +798,7 @@ export default function ReportsPage() {
     // Hitung pendapatan masing-masing trainer
     const revenueMap = new Map<string, number>();
 
+    // Pendapatan dari pembelian paket trainer
     for (const packageMember of packageMembers ?? []) {
       if (!packageMember.transaction_id) {
         continue;
@@ -588,7 +813,21 @@ export default function ReportsPage() {
       );
     }
 
-    // Gabungkan seluruh data untuk laporan
+    // Pendapatan dari PT per sesi
+    for (const session of singleSessions ?? []) {
+      if (!session.transaction_id) {
+        continue;
+      }
+
+      const amount =
+        transactionMap.get(session.transaction_id) ?? 0;
+
+      revenueMap.set(
+        session.trainer_id,
+        (revenueMap.get(session.trainer_id) ?? 0) + amount
+      );
+    }
+
     setTrainerReport(
       trainers.map((trainer) => ({
         id: trainer.id,
@@ -596,6 +835,153 @@ export default function ReportsPage() {
         memberCount: memberCountMap.get(trainer.id) ?? 0,
         sessionCount: sessionCountMap.get(trainer.id) ?? 0,
         revenue: revenueMap.get(trainer.id) ?? 0,
+      }))
+    );
+  }
+
+  async function loadTransactionReport() {
+    const supabase = createClient();
+
+    const branchId = getActiveBranchId();
+
+    if (!branchId) {
+      setMessage("Cabang aktif belum dipilih.");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(`
+      id,
+      transaction_date,
+      transaction_type,
+      payment_method,
+      total_amount,
+      status,
+      notes,
+      customer_name,
+      members (
+        name
+      )
+    `)
+      .eq("branch_id", branchId)
+      .gte(
+        "transaction_date",
+        `${startDate}T00:00:00`
+      )
+      .lte(
+        "transaction_date",
+        `${endDate}T23:59:59`
+      )
+      .order("transaction_date", {
+        ascending: false,
+      });
+
+    if (error) {
+      console.error(error);
+      setMessage("Gagal mengambil data transaksi.");
+      return;
+    }
+
+    const formattedTransactions = (data ?? []).map(
+      (transaction) => ({
+        id: transaction.id,
+        transactionDate: transaction.transaction_date,
+        transactionType: transaction.transaction_type,
+        memberName:
+          transaction.members?.[0]?.name ??
+          transaction.customer_name ??
+          "Non-member",
+        paymentMethod: transaction.payment_method,
+        totalAmount: Number(transaction.total_amount ?? 0),
+        status: transaction.status,
+        notes: transaction.notes,
+      })
+    );
+
+    setTransactionReport(formattedTransactions);
+  }
+
+  async function loadProductReport() {
+    const supabase = createClient();
+
+    const branchId = getActiveBranchId();
+
+    if (!branchId) {
+      setMessage("Cabang aktif belum dipilih.");
+      return;
+    }
+
+    const { data: products, error: productError } = await supabase
+      .from("products")
+      .select("id, name, category, price, stock")
+      .eq("branch_id", branchId)
+      .order("name", { ascending: true });
+
+    if (productError) {
+      console.error(productError);
+      setMessage("Gagal mengambil data produk.");
+      return;
+    }
+
+    const productIds = (products ?? []).map(
+      (product) => product.id
+    );
+
+    let stockMovements: {
+      product_id: string;
+      type: string;
+      quantity: number;
+    }[] = [];
+
+    if (productIds.length > 0) {
+      const { data, error } = await supabase
+        .from("stock_movements")
+        .select("product_id, type, quantity")
+        .eq("branch_id", branchId)
+        .in("product_id", productIds)
+        .gte("created_at", `${startDate}T00:00:00`)
+        .lte("created_at", `${endDate}T23:59:59`);
+
+      if (error) {
+        console.error(error);
+        setMessage("Gagal mengambil data pergerakan stok.");
+        return;
+      }
+
+      stockMovements = data ?? [];
+    }
+
+    const stockInMap = new Map<string, number>();
+    const stockOutMap = new Map<string, number>();
+
+    for (const movement of stockMovements) {
+      const quantity = Number(movement.quantity ?? 0);
+
+      if (movement.type === "in") {
+        stockInMap.set(
+          movement.product_id,
+          (stockInMap.get(movement.product_id) ?? 0) + quantity
+        );
+      }
+
+      if (movement.type === "out") {
+        stockOutMap.set(
+          movement.product_id,
+          (stockOutMap.get(movement.product_id) ?? 0) + quantity
+        );
+      }
+    }
+
+    setProductReport(
+      (products ?? []).map((product) => ({
+        id: product.id,
+        name: product.name,
+        category: product.category ?? "",
+        price: Number(product.price ?? 0),
+        stockIn: stockInMap.get(product.id) ?? 0,
+        stockOut: stockOutMap.get(product.id) ?? 0,
+        currentStock: Number(product.stock ?? 0),
       }))
     );
   }
@@ -704,6 +1090,7 @@ export default function ReportsPage() {
 
         <button
           type="button"
+          onClick={handleExportXlsx}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
         >
           Export XLSX
@@ -734,6 +1121,14 @@ export default function ReportsPage() {
 
       {selectedReports.includes("trainers") && showReport && (
         <TrainersReport trainers={trainerReport} />
+      )}
+
+      {selectedReports.includes("transactions") && showReport && (
+        <TransactionReport transactions={transactionReport} />
+      )}
+
+      {selectedReports.includes("products") && showReport && (
+        <ProductReport products={productReport} />
       )}
 
       {/* Pesan */}

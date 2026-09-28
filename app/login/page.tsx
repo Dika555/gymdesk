@@ -26,11 +26,11 @@ export default function LoginPage() {
     }
 
     console.log("Login berhasil!");
-    console.log("User ID:", data.user.id);
+    console.log("User ID:", data.user.id,);
 
     const { data: userData, error: userError } = await supabase
       .from("users")
-      .select("name, email, role, branch_id")
+      .select("name, email, role, branch_id, is_active")
       .eq("id", data.user.id)
       .single();
 
@@ -41,9 +41,16 @@ export default function LoginPage() {
 
     console.log("Data user:", userData);
     console.log("Role:", userData.role);
+    if (!userData.is_active) {
+      await supabase.auth.signOut();
+
+      alert("Akun kamu sedang dinonaktifkan. Silakan hubungi Super Admin.");
+
+      return;
+    }
 
     router.push("/");
-    
+
   }
 
   return (

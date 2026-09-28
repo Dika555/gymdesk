@@ -4,11 +4,6 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getActiveBranchId } from "@/lib/branch";
 
-type Member = {
-  id: string;
-  name: string;
-};
-
 type Product = {
   id: string;
   name: string;
@@ -32,10 +27,9 @@ export default function AddProductTransactionForm({
 }: Props) {
   const supabase = createClient();
 
-  const [members, setMembers] = useState<Member[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
 
-  const [memberId, setMemberId] = useState("");
+  const [customerName, setCustomerName] = useState("");
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [paymentMethod, setPaymentMethod] = useState("cash");
@@ -49,42 +43,26 @@ export default function AddProductTransactionForm({
       const branchId = getActiveBranchId();
 
       if (!branchId) {
-        setMembers([]);
         setProducts([]);
         return;
       }
 
-      const [membersResult, productsResult] = await Promise.all([
-        supabase
-          .from("members")
-          .select("id, name")
-          .eq("branch_id", branchId)
-          .order("name", { ascending: true }),
+      const { data, error } = await supabase
+        .from("products")
+        .select("id, name, price, stock")
+        .eq("branch_id", branchId)
+        .eq("status", "active")
+        .order("name", { ascending: true });
 
-        supabase
-          .from("products")
-          .select("id, name, price, stock")
-          .eq("branch_id", branchId)
-          .eq("status", "active")
-          .order("name", { ascending: true }),
-      ]);
-
-      if (membersResult.error) {
-        console.error(
-          "Gagal mengambil member:",
-          membersResult.error,
-        );
-      }
-
-      if (productsResult.error) {
+      if (error) {
         console.error(
           "Gagal mengambil produk:",
-          productsResult.error,
+          error,
         );
+        return;
       }
 
-      setMembers(membersResult.data ?? []);
-      setProducts(productsResult.data ?? []);
+      setProducts(data ?? []);
     }
 
     getData();
@@ -133,9 +111,9 @@ export default function AddProductTransactionForm({
         cart.map((item) =>
           item.productId === product.id
             ? {
-              ...item,
-              quantity: newQuantity,
-            }
+                ...item,
+                quantity: newQuantity,
+              }
             : item,
         ),
       );
@@ -162,7 +140,8 @@ export default function AddProductTransactionForm({
   }
 
   const cartTotal = cart.reduce(
-    (sum, item) => sum + item.price * item.quantity,
+    (sum, item) =>
+      sum + item.price * item.quantity,
     0,
   );
 
@@ -181,6 +160,11 @@ export default function AddProductTransactionForm({
     e: React.FormEvent<HTMLFormElement>,
   ) {
     e.preventDefault();
+
+    if (!customerName.trim()) {
+      alert("Nama pelanggan harus diisi.");
+      return;
+    }
 
     let itemsToSave = [...cart];
 
@@ -221,9 +205,9 @@ export default function AddProductTransactionForm({
         itemsToSave = itemsToSave.map((item) =>
           item.productId === product.id
             ? {
-              ...item,
-              quantity: newQuantity,
-            }
+                ...item,
+                quantity: newQuantity,
+              }
             : item,
         );
       } else {
@@ -256,16 +240,19 @@ export default function AddProductTransactionForm({
       quantity: item.quantity,
     }));
 
-    const { data, error } = await supabase.rpc(
-      "create_product_transaction",
-      {
-        p_branch_id: branchId,
-        p_member_id: memberId || null,
-        p_payment_method: paymentMethod,
-        p_notes: notes.trim() || null,
-        p_items: items,
-      },
-    );
+    // Buat transaksi produk melalui RPC.
+    // RPC tetap menangani transaksi dan stok.
+    const { data: transactionId, error } =
+      await supabase.rpc(
+        "create_product_transaction",
+        {
+          p_branch_id: branchId,
+          p_member_id: null,
+          p_payment_method: paymentMethod,
+          p_notes: notes.trim() || null,
+          p_items: items,
+        },
+      );
 
     if (error) {
       console.error(
@@ -277,11 +264,34 @@ export default function AddProductTransactionForm({
       return;
     }
 
-    console.log("Transaction ID:", data);
+    // Simpan nama pelanggan pada transaksi
+    const { error: customerNameError } =
+      await supabase
+        .from("transactions")
+        .update({
+          customer_name: customerName.trim(),
+        })
+        .eq("id", transactionId)
+        .eq("branch_id", branchId);
+
+    if (customerNameError) {
+      console.error(
+        "Transaksi berhasil dibuat, tetapi nama pelanggan gagal disimpan:",
+        customerNameError,
+      );
+
+      alert(
+        "Transaksi berhasil dibuat, tetapi nama pelanggan gagal disimpan: " +
+          customerNameError.message,
+      );
+
+      setSaving(false);
+      return;
+    }
 
     alert("Transaksi berhasil disimpan.");
 
-    setMemberId("");
+    setCustomerName("");
     setProductId("");
     setQuantity("1");
     setPaymentMethod("cash");
@@ -297,30 +307,25 @@ export default function AddProductTransactionForm({
       onSubmit={handleSubmit}
       className="space-y-5"
     >
-      {/* Member */}
+      {/* Nama Pelanggan */}
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Member
+          Nama Pelanggan
         </label>
 
-        <select
-          value={memberId}
+        <input
+          type="text"
+          value={customerName}
           onChange={(e) =>
-            setMemberId(e.target.value)
+            setCustomerName(e.target.value)
           }
+          placeholder="Masukkan nama pelanggan"
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 outline-none focus:border-orange-500"
-        >
-          <option value="">Non-member</option>
+        />
 
-          {members.map((member) => (
-            <option
-              key={member.id}
-              value={member.id}
-            >
-              {member.name}
-            </option>
-          ))}
-        </select>
+        <p className="mt-1 text-xs text-zinc-500">
+          Masukkan nama pelanggan yang melakukan pembelian produk.
+        </p>
       </div>
 
       {/* Produk */}
@@ -492,6 +497,7 @@ export default function AddProductTransactionForm({
         type="submit"
         disabled={
           saving ||
+          !customerName.trim() ||
           (!productId && cart.length === 0)
         }
         className="w-full rounded-lg bg-orange-500 px-4 py-2 font-medium text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { getActiveBranchId } from "@/lib/branch";
 import AddTransactionButton from "@/components/AddTransactionButton";
@@ -13,6 +14,7 @@ type Transaction = {
   status: string;
   transaction_date: string;
   notes: string | null;
+  customer_name: string | null;
   members: {
     name: string;
   } | null;
@@ -43,17 +45,20 @@ export default function TransactionsPage() {
     const { data, error } = await supabase
       .from("transactions")
       .select(`
-        id,
-        transaction_type,
-        payment_method,
-        total_amount,
-        status,
-        transaction_date,
-        notes,
-        members (
-          name
-        )
-      `)
+  id,
+  transaction_type,
+  payment_method,
+  total_amount,
+  status,
+  transaction_date,
+  notes,
+  customer_name,
+  members!transactions_member_id_fkey (
+    id,
+    name
+  )
+`)
+
       .eq("branch_id", branchId)
       .order("transaction_date", {
         ascending: false,
@@ -64,6 +69,11 @@ export default function TransactionsPage() {
       setLoading(false);
       return;
     }
+
+    console.log(
+  "TRANSAKSI PERTAMA:",
+  JSON.stringify(data?.[0], null, 2)
+);
 
     setTransactions(
       (data ?? []).map((transaction) => ({
@@ -247,7 +257,7 @@ export default function TransactionsPage() {
                     </th>
 
                     <th className="px-4 py-3">
-                      Member
+                      Nama
                     </th>
 
                     <th className="px-4 py-3">
@@ -264,6 +274,10 @@ export default function TransactionsPage() {
 
                     <th className="px-4 py-3">
                       Status
+                    </th>
+
+                    <th className="px-4 py-3">
+                      Aksi
                     </th>
                   </tr>
                 </thead>
@@ -283,7 +297,8 @@ export default function TransactionsPage() {
 
                         <td className="px-4 py-4 font-medium">
                           {transaction.members?.name ??
-                            "Non-member"}
+                            transaction.customer_name ??
+                            "-"}
                         </td>
 
                         <td className="px-4 py-4">
@@ -315,6 +330,15 @@ export default function TransactionsPage() {
                           >
                             {transaction.status}
                           </span>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <Link
+                            href={`/transactions/${transaction.id}`}
+                            className="text-sm font-medium text-orange-500 hover:text-orange-600"
+                          >
+                            Detail
+                          </Link>
                         </td>
                       </tr>
                     ),

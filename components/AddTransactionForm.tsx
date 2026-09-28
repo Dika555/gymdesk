@@ -31,6 +31,7 @@ export default function AddTransactionForm({ onSuccess }: Props) {
 
   const [transactionType, setTransactionType] = useState("membership");
   const [memberId, setMemberId] = useState("");
+  const [customerName, setCustomerName] = useState("");
   const [planId, setPlanId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
@@ -85,6 +86,7 @@ export default function AddTransactionForm({ onSuccess }: Props) {
     setTransactionType(value);
 
     setMemberId("");
+    setCustomerName("");
     setPlanId("");
     setStartDate("");
     setTotalAmount("");
@@ -130,6 +132,14 @@ export default function AddTransactionForm({ onSuccess }: Props) {
       }
     }
 
+    if (
+      transactionType === "other" &&
+      !customerName.trim()
+    ) {
+      alert("Silakan masukkan nama pelanggan.");
+      return;
+    }
+
     setSaving(true);
 
     const supabase = createClient();
@@ -170,6 +180,7 @@ export default function AddTransactionForm({ onSuccess }: Props) {
         .insert({
           branch_id: branchId,
           member_id: memberId || null,
+          customer_name: memberId ? null : customerName.trim() || null,
           transaction_type: "other",
           payment_method: paymentMethod,
           total_amount: Number(totalAmount),
@@ -277,6 +288,27 @@ export default function AddTransactionForm({ onSuccess }: Props) {
           </p>
         )}
       </div>
+
+      {/* Nama Pelanggan */}
+      {transactionType === "other" && (
+        <div>
+          <label className="mb-1 block text-sm font-medium text-zinc-700">
+            Nama Pelanggan
+          </label>
+
+          <input
+            type="text"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Masukkan nama pelanggan"
+            className="w-full rounded-lg border border-zinc-300 px-3 py-2 outline-none focus:border-orange-500"
+          />
+
+          <p className="mt-1 text-xs text-zinc-500">
+            Isi jika transaksi dilakukan oleh non-member.
+          </p>
+        </div>
+      )}
 
       {/* Detail Membership */}
       {transactionType === "membership" && (
